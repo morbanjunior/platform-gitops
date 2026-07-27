@@ -1,0 +1,75 @@
+name: Validate
+
+# Every change to this repository is a change to the cluster, so it gets checked
+# before it can be merged -- including the promotion pull requests opened by the
+# pipelines.
+#
+# The failure this prevents: a broken values file merges, ArgoCD applies it, and
+# the first sign of trouble is a Degraded application in the cluster. Here it is
+# a red check on a pull request instead.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Lint and render every app in every environment
+        run: |
+          set -euo pipefail
+          failed=0
+
+          for app in apps/*/; do
+            name=$(basename "$app")
+            [ -d "${app}chart" ] || continue
+
+            for env_file in "${app}envs"/*.yaml; do
+              env_name=$(basename "$env_file" .yaml)
+              echo "::group::$name / $env_name"
+
+              helm lint "${app}chart" \
+                -f "${app}chart/values.yaml" -f "$env_file" || failed=1
+
+              # Rendering is the real check. It is what catches a missing
+              # required value, a bad indent or a template that only breaks
+              # under this particular combination of values.
+              helm template "$name" "${app}chart" \
+                -f "${app}chart/values.yaml" -f "$env_file" > /dev/null || failed=1
+
+              echo "::endgroup::"
+            done
+          done
+
+          exit $failed
+
+      - name: Validate rendered manifests against the Kubernetes API schemas
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp
+          sudo mv /tmp/kubeconform /usr/local/bin/
+
+          for app in apps/*/; do
+            name=$(basename "$app")
+            [ -d "${app}chart" ] || continue
+
+            for env_file in "${app}envs"/*.yaml; do
+              echo "kubeconform: $name / $(basename "$env_file" .yaml)"
+              # helm template only proves the YAML is valid YAML. kubeconform
+              # proves it is valid Kubernetes: wrong field names, wrong types
+              # and deprecated apiVersions are caught here rather than by the
+              # apiserver during a sync.
+              helm template "$name" "${app}chart" \
+                -f "${app}chart/values.yaml" -f "$env_file" \
+              | kubeconform -strict -summary -ignore-missing-schemas
+            done
+          done
