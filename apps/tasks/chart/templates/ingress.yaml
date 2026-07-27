@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tasks.fullname" . }}
+  labels:
+    {{- include "tasks.labels" (dict "root" $ "component" "ingress") | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ required "ingress.host is required (set it in envs/<env>.yaml)" .Values.ingress.host | quote }}
+      http:
+        paths:
+          # /api first. The controller matches the longest prefix, but keeping
+          # the specific rule above the catch-all makes the intent readable.
+          #
+          # No rewrite-target annotation: the backend already serves its routes
+          # under /api, so the path is forwarded untouched. Rewriting here would
+          # strip the prefix and turn every call into a 404.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tasks.componentName" (dict "root" $ "component" "backend") }}
+                port:
+                  number: {{ .Values.backend.service.port }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tasks.componentName" (dict "root" $ "component" "frontend") }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end }}

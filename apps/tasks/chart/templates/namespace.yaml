@@ -1,0 +1,13 @@
+{{- if .Values.namespace.create }}
+# The namespace is a versioned resource like any other, so it can carry labels,
+# quotas or network policies that are reviewable in a pull request.
+#
+# ArgoCD applies namespaces before the workloads that live in them, so the
+# database Secret can be created as soon as the first sync completes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ required "namespace.name is required (set it in envs/<env>.yaml)" .Values.namespace.name }}
+  labels:
+    {{- include "tasks.labels" (dict "root" $ "component" "namespace") | nindent 4 }}
+{{- end }}

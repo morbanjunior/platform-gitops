@@ -1,0 +1,17 @@
+# Review rules for the platform.
+#
+# Enforced by branch protection on main: a pull request touching a path below
+# cannot be merged without approval from its owner. This file plus branch
+# protection is what turns "a commit deploys to production" into a controlled
+# operation rather than an accident waiting to happen.
+
+# Default owner for anything not matched below.
+*                           @morbanjunior
+
+# Production values. Every deployment to production is a pull request that
+# changes one of these files, so this line is the production change control.
+apps/*/envs/prod.yaml       @morbanjunior
+
+# Bootstrap and Application manifests define what exists in the cluster at all.
+bootstrap/                  @morbanjunior
+apps/*/applications/        @morbanjunior

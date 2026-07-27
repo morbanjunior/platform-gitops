@@ -1,0 +1,58 @@
+# Chart defaults: everything that is the SAME in every environment.
+#
+# Anything that differs between dev, staging and prod belongs in
+# ../envs/<environment>.yaml, which is layered on top of this file.
+# Nothing here should ever need editing to deploy to a new environment.
+
+# Resource names are stable across environments because each environment gets
+# its own namespace: tasks-backend in tasks-dev, tasks-staging and tasks-prod.
+fullnameOverride: tasks
+
+namespace:
+  create: true
+  name: ""          # set per environment
+
+environment: ""     # dev | staging | prod, set per environment
+
+backend:
+  image:
+    repository: morbanjunior/tasks-api
+    tag: ""         # set per environment, rewritten by the pipeline
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8000
+  resources: {}     # set per environment
+  autoscaling:
+    enabled: false  # opt in per environment
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  image:
+    repository: morbanjunior/tasks-frontend
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8080
+  resources: {}
+
+# PostgreSQL runs outside the cluster, as a managed instance would. Only the
+# database name changes per environment; the password always comes from a
+# Secret created out of band.
+database:
+  host: host.minikube.internal
+  port: 5432
+  user: appuser
+  name: ""          # set per environment
+  passwordSecret:
+    name: tasks-db-credentials
+    key: password
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ""          # set per environment
+  annotations: {}

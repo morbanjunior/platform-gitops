@@ -1,0 +1,37 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tasks-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/morbanjunior/platform-gitops.git
+    targetRevision: main
+    path: apps/tasks/chart
+    helm:
+      valueFiles:
+        - values.yaml
+        - ../envs/staging.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tasks-staging
+
+  # Still fully automated. The gate for staging is the pull request that
+  # changes envs/staging.yaml -- not a manual sync button. Once a change is
+  # merged, holding it back in ArgoCD would only mean the cluster disagrees
+  # with Git, which is the state GitOps exists to prevent.
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

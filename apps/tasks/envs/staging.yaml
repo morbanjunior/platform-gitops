@@ -1,0 +1,48 @@
+# STAGING
+#
+# Updated by a pull request opened by the promote workflow. Never edited by
+# hand and never written to directly by CI.
+#
+# Purpose: rehearse production. Same shape as prod -- autoscaling on, more than
+# one replica possible -- but smaller, so behaviour under load and during a
+# rolling update can be observed before it matters.
+
+environment: staging
+
+namespace:
+  name: tasks-staging
+
+database:
+  name: appdb_staging
+
+ingress:
+  host: staging.tasks.local
+
+backend:
+  image:
+    tag: v1.0.2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  autoscaling:
+    # On, so the HPA configuration itself is exercised before prod depends on it.
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 70
+
+frontend:
+  image:
+    tag: v1.0.2
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi

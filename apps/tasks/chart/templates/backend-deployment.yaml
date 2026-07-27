@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tasks.componentName" (dict "root" $ "component" "backend") }}
+  labels:
+    {{- include "tasks.labels" (dict "root" $ "component" "backend") | nindent 4 }}
+spec:
+  # replicas is omitted when the HPA owns this Deployment. If it stayed, Helm
+  # and the HPA would fight over the same field on every sync -- and with
+  # ArgoCD selfHeal enabled that fight never ends.
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tasks.selectorLabels" (dict "root" $ "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tasks.selectorLabels" (dict "root" $ "component" "backend") | nindent 8 }}
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ required "backend.image.tag is required (set it in envs/<env>.yaml)" .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_NAME
+              value: {{ required "database.name is required (set it in envs/<env>.yaml)" .Values.database.name | quote }}
+            # Read from a Secret that exists only in the cluster, never in Git.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.passwordSecret.name }}
+                  key: {{ .Values.database.passwordSecret.key }}
+            - name: CORS_ORIGINS
+              value: "*"
+          # Liveness never touches the database: losing Postgres must remove the
+          # pod from the Service, not restart it in a loop.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}

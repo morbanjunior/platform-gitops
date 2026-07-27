@@ -1,0 +1,15 @@
+# Nothing rendered or secret belongs in a GitOps repository
+*.secret.yaml
+secret*.yaml
+*.local.yaml
+rendered/
+
+# Helm build artifacts
+apps/*/chart/charts/
+*.tgz
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
