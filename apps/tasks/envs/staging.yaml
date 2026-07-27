@@ -8,19 +8,15 @@
 # rolling update can be observed before it matters.
 
 environment: staging
-
 namespace:
   name: tasks-staging
-
 database:
   name: appdb_staging
-
 ingress:
   host: staging.tasks.local
-
 backend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   resources:
     requests:
       cpu: 100m
@@ -34,10 +30,9 @@ backend:
     minReplicas: 1
     maxReplicas: 3
     targetCPUUtilizationPercentage: 70
-
 frontend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   replicaCount: 1
   resources:
     requests:
