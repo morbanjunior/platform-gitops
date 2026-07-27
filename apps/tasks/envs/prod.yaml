@@ -20,7 +20,7 @@ ingress:
 
 backend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   resources:
     requests:
       cpu: 100m
@@ -39,7 +39,7 @@ backend:
 
 frontend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   # Same reasoning: static content is cheap, an outage is not.
   replicaCount: 2
   resources:
