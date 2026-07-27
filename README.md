@@ -4,6 +4,9 @@ Repositorio GitOps de la plataforma. **Lo que está aquí es lo que corre en el
 clúster.** ArgoCD reconcilia continuamente: cambiar algo en el clúster a mano
 no cambia nada de forma duradera, se revierte solo.
 
+📖 **[RUNBOOK.md](RUNBOOK.md)** — cómo se opera esta plataforma: desplegar,
+promover, hacer rollback, añadir una app y diagnosticar fallos.
+
 ## Estructura
 
 ```
