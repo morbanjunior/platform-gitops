@@ -8,19 +8,15 @@
 # answer "does it start and talk to its dependencies?", not "does it scale?".
 
 environment: dev
-
 namespace:
   name: tasks-dev
-
 database:
   name: appdb_dev
-
 ingress:
   host: dev.tasks.local
-
 backend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   replicaCount: 1
   resources:
     requests:
@@ -33,10 +29,9 @@ backend:
     # Off in dev: a single replica makes logs and debugging straightforward,
     # and autoscaling on a laptop only burns resources.
     enabled: false
-
 frontend:
   image:
-    tag: v1.0.2
+    tag: v1.0.4
   replicaCount: 1
   resources:
     requests:
