@@ -1,0 +1,79 @@
+{{- if .Values.redis.enabled }}
+{{- $name := include "orders.componentName" (dict "root" $ "component" "redis") }}
+# A StatefulSet, not a Deployment.
+#
+# The difference that matters here is the volume: a StatefulSet gives each
+# replica its own PersistentVolumeClaim that survives the pod. With a
+# Deployment and an emptyDir, every restart would wipe the stream -- and a
+# restart happens on every node drain and every image change.
+#
+# The stable name matters too. orders and inventory find Redis by DNS, and a
+# StatefulSet pod is always orders-redis-0, never a random suffix.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "orders.labels" (dict "root" $ "component" "redis") | nindent 4 }}
+spec:
+  serviceName: {{ $name }}
+  # Exactly one. Redis clustering or replication would be a project of its own,
+  # and this data is worth seconds, not a failover story.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+          # appendonly writes every command to disk, so the events that were in
+          # flight survive a restart rather than only the last snapshot.
+          args: ["redis-server", "--appendonly", "yes"]
+          ports:
+            - name: redis
+              containerPort: {{ .Values.redis.port }}
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.redis.storage }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "orders.labels" (dict "root" $ "component" "redis") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: {{ .Values.redis.port }}
+      targetPort: redis
+  selector:
+    {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 4 }}
+{{- end }}

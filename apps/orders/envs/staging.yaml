@@ -1,0 +1,51 @@
+# STAGING
+#
+# Updated by a pull request opened by the promote workflow.
+#
+# Purpose: rehearse production. The one thing that must be exercised before
+# production depends on it is the consumer group with more than one member --
+# a bug where every replica applies the same event is invisible with one.
+
+environment: staging
+
+namespace:
+  name: orders-staging
+
+database:
+  name: appdb_staging
+
+ingress:
+  host: staging.orders.local
+
+gateway:
+  image:
+    tag: v1.0.0
+  replicaCount: 1
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+
+orders:
+  image:
+    tag: v1.0.0
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+inventory:
+  image:
+    tag: v1.0.0
+  # Two consumers. Redis delivers each event to exactly one member of the
+  # group, so the totals must come out the same as with one replica. If they
+  # do not, the consumer group is wrong -- and staging is where that surfaces.
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+redis:
+  storage: 1Gi
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 192Mi }

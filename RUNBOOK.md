@@ -106,7 +106,73 @@ registrada en el historial igual que cualquier otra.
 
 ---
 
-## 5. Añadir una aplicación nueva
+## 5. Forzar a ArgoCD (no esperar los 3 minutos)
+
+ArgoCD consulta el repositorio cada **180 segundos**. Tras un merge, hasta 3
+minutos de espera es lo normal, no un fallo.
+
+Señal inequívoca de que está en ello: la Application dice `Synced` pero
+`.status.sync.revision` **no es el último commit de `main`**. Está sincronizada
+con una foto vieja del repositorio.
+
+```powershell
+# Qué revisión tiene ArgoCD frente a la que hay en GitHub
+kubectl get application <app> -n argocd -o jsonpath="{.status.sync.revision}"
+git ls-remote https://github.com/morbanjunior/platform-gitops.git main
+```
+
+### Forzar el refresco de una aplicación
+
+```powershell
+kubectl annotate application <app> -n argocd argocd.argoproj.io/refresh=hard --overwrite
+kubectl get application <app> -n argocd -w
+```
+
+Debe pasar por `OutOfSync → Progressing → Synced` con la revisión nueva.
+
+| Valor | Qué hace |
+|---|---|
+| `refresh=normal` | Vuelve a leer Git y compara con el clúster |
+| `refresh=hard` | Igual, pero además descarta la caché del manifiesto renderizado |
+
+Usa `hard` cuando el cambio esté en el chart o en un values file — que es
+siempre en esta plataforma, porque las imágenes se despliegan por tag.
+
+### Forzar todas a la vez
+
+```powershell
+kubectl annotate application --all -n argocd argocd.argoproj.io/refresh=hard --overwrite
+```
+
+### Con la CLI de ArgoCD (si está instalada)
+
+```powershell
+argocd app get <app> --refresh          # refresca y muestra el estado
+argocd app sync <app>                   # además fuerza la sincronización
+argocd app sync <app> --prune
+```
+
+### Bajar el intervalo para todo el clúster
+
+Útil mientras se prueban cosas; en producción se usa un webhook en su lugar.
+
+```powershell
+kubectl patch configmap argocd-cm -n argocd --type merge -p '{\"data\":{\"timeout.reconciliation\":\"30s\"}}'
+kubectl rollout restart statefulset argocd-application-controller -n argocd
+```
+
+Para volver al valor por defecto, pon `180s`.
+
+> **Lo correcto en producción es un webhook**: GitHub hace un `POST` a
+> `https://<argocd>/api/webhook` en el instante del push y la sincronización
+> ocurre en segundos. Aquí no se usa porque el clúster local no es alcanzable
+> desde internet, así que el poll es la alternativa razonable. Bajarlo
+> indefinidamente no es gratis: cada ciclo es un `git fetch` por Application, y
+> con muchas aplicaciones eso se nota en el repo-server y en la API de GitHub.
+
+---
+
+## 6. Añadir una aplicación nueva
 
 ```
 apps/<nombre>/
@@ -136,7 +202,7 @@ Cuatro valores tienen que ser únicos o las apps chocan entre sí:
 
 ---
 
-## 6. Diagnóstico de fallos
+## 7. Diagnóstico de fallos
 
 ### `kubectl` da `connection refused`
 
@@ -196,14 +262,14 @@ gh run rerun <run-id> -R morbanjunior/api-backend --failed
 
 ### ArgoCD no se entera del cambio
 
-El poll es de 3 minutos. Para forzarlo:
+Ver **§5. Forzar a ArgoCD**. Comprobación rápida de si es solo el poll:
 
 ```powershell
-kubectl annotate application <app> -n argocd argocd.argoproj.io/refresh=hard --overwrite
+kubectl get application <app> -n argocd -o jsonpath="{.status.sync.revision}"
 ```
 
-En producción esto se resuelve con un webhook de GitHub; aquí no aplica porque
-el clúster local no es alcanzable desde internet.
+Si esa revisión no es el último commit de `main`, no hay ningún fallo — está
+esperando su próximo ciclo.
 
 ### El navegador no muestra el cambio
 
@@ -217,7 +283,7 @@ Si ahí sale la versión nueva, `Ctrl+Shift+R` en el navegador.
 
 ---
 
-## 7. Arranque del clúster desde cero
+## 8. Arranque del clúster desde cero
 
 ```powershell
 minikube start
@@ -244,7 +310,7 @@ permiten versionar el secreto cifrado.
 
 ---
 
-## 8. Acceso a la UI de ArgoCD
+## 9. Acceso a la UI de ArgoCD
 
 ```powershell
 $pw = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"

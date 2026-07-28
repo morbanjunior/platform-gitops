@@ -1,0 +1,7 @@
+apiVersion: v2
+name: orders
+description: Orders platform - gateway, orders and inventory services with Redis Streams
+type: application
+
+version: 0.1.0
+appVersion: "1.0.0"

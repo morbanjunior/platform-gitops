@@ -1,0 +1,8 @@
+{{- if .Values.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ required "namespace.name is required (set it in envs/<env>.yaml)" .Values.namespace.name }}
+  labels:
+    {{- include "orders.labels" (dict "root" $ "component" "namespace") | nindent 4 }}
+{{- end }}

@@ -1,0 +1,47 @@
+# DEV
+#
+# Updated automatically by the orders-platform pipeline on every release.
+# Do not edit the image tags by hand.
+
+environment: dev
+
+namespace:
+  name: orders-dev
+
+database:
+  name: appdb_dev
+
+ingress:
+  host: dev.orders.local
+
+gateway:
+  image:
+    tag: v1.0.0
+  replicaCount: 1
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits:   { cpu: 200m, memory: 128Mi }
+
+orders:
+  image:
+    tag: v1.0.0
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { cpu: 300m, memory: 192Mi }
+
+inventory:
+  image:
+    tag: v1.0.0
+  # One consumer in dev: with a single replica the logs tell the whole story of
+  # what the consumer did, which is what dev is for.
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { cpu: 300m, memory: 192Mi }
+
+redis:
+  storage: 1Gi
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits:   { cpu: 100m, memory: 128Mi }

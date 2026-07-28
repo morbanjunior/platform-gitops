@@ -1,0 +1,75 @@
+# Chart defaults: everything identical in every environment.
+# Anything that differs lives in ../envs/<environment>.yaml.
+
+fullnameOverride: orders
+
+namespace:
+  create: true
+  name: ""
+
+environment: ""
+
+# Only the gateway is exposed through the Ingress. orders and inventory are
+# ClusterIP-only: nothing outside the cluster can reach them directly, which is
+# what makes the gateway a real boundary rather than a suggestion.
+gateway:
+  image:
+    repository: morbanjunior/orders-gateway
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8000
+  resources: {}
+
+orders:
+  image:
+    repository: morbanjunior/orders-api
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8000
+  resources: {}
+
+inventory:
+  image:
+    repository: morbanjunior/orders-inventory
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    port: 8000
+  resources: {}
+
+# Redis lives INSIDE the cluster, unlike Postgres.
+#
+# The reasoning is about what the data is worth. Postgres holds the record of
+# what happened and is worth a managed service with backups and failover. Redis
+# holds events in flight -- seconds to minutes of data. Losing it costs a
+# handful of unprocessed events, not the business. A StatefulSet with a volume
+# is the right amount of durability for that.
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  port: 6379
+  storage: 1Gi
+  resources: {}
+
+database:
+  host: host.minikube.internal
+  port: 5432
+  user: appuser
+  name: ""
+  passwordSecret:
+    name: orders-db-credentials
+    key: password
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ""
+  annotations: {}
