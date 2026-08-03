@@ -320,6 +320,55 @@ Tras arreglarlo, no hace falta un release nuevo:
 gh run rerun <run-id> -R morbanjunior/api-backend --failed
 ```
 
+### Una SealedSecret no crea su Secret
+
+```powershell
+kubectl get sealedsecret <nombre> -n <ns> -o jsonpath="{.status.conditions[0].message}"
+kubectl logs -n kube-system -l name=sealed-secrets-controller --tail=30
+```
+
+**`already exists and is not managed by SealedSecret`**
+
+Ya hay un `Secret` con ese nombre que el controlador no creó — normalmente uno
+hecho a mano con `kubectl create secret`. El controlador **no lo sobrescribe a
+propósito**: adoptar cualquier Secret existente permitiría a quien pueda
+commitear en este repositorio pisar credenciales gestionadas por otro sistema.
+
+Dos salidas:
+
+```powershell
+# Simple: borrarlo y dejar que el controlador lo cree
+kubectl delete secret <nombre> -n <ns>
+
+# Sin ventana: transferir la propiedad del Secret existente
+kubectl annotate secret <nombre> -n <ns> sealedsecrets.bitnami.com/managed=true
+```
+
+Borrar el Secret no interrumpe a los pods que ya corren: `secretKeyRef` se lee
+al arrancar el contenedor. En una migración de producción con muchos secretos,
+usa la anotación.
+
+**`Error updating, giving up`**
+
+El controlador tiene backoff exponencial y **abandona** una clave que falla
+siempre. Cuando arreglas la causa, ya no la está mirando. Fuerza un resync
+completo:
+
+```powershell
+kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+```
+
+Es seguro: el controlador no guarda estado, toda la verdad está en los objetos
+de la API. Al arrancar vuelve a listar todas las SealedSecret y las procesa.
+
+Comprobación de que el Secret lo creó el controlador y no una persona:
+
+```powershell
+kubectl get secret <nombre> -n <ns> -o jsonpath="{.metadata.ownerReferences[0].kind}"
+```
+
+Debe decir `SealedSecret`. Vacío significa que sigue siendo el manual.
+
 ### ArgoCD no se entera del cambio
 
 Ver **§5. Forzar a ArgoCD**. Comprobación rápida de si es solo el poll:
