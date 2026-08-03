@@ -67,6 +67,9 @@ database:
   passwordSecret:
     name: orders-db-credentials
     key: password
+    # Ciphertext set per environment in ../envs/<env>.yaml -- a SealedSecret is
+    # bound to a single namespace, so each environment carries its own.
+    encrypted: ""
 
 ingress:
   enabled: true

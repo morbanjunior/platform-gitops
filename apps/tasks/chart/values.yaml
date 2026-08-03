@@ -50,6 +50,11 @@ database:
   passwordSecret:
     name: tasks-db-credentials
     key: password
+    # Ciphertext set per environment in ../envs/<env>.yaml. It cannot live here:
+    # a SealedSecret is bound to one namespace, so every environment needs its
+    # own. Empty means no SealedSecret is rendered and the Secret is expected to
+    # exist already -- which is how a cluster without the controller still works.
+    encrypted: ""
 
 ingress:
   enabled: true

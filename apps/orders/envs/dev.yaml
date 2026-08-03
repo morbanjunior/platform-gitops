@@ -10,6 +10,11 @@ namespace:
 
 database:
   name: appdb_dev
+  passwordSecret:
+    # Encrypted for this namespace with the cluster's public key. Only the
+    # sealed-secrets controller can decrypt it, so this is safe in a public
+    # repository. Reseal with kubeseal to change it -- see RUNBOOK.
+    encrypted: AgAklRuDM5VqZtlZpLYw3KI7dgj5sHojjpMbfuC7yjNvMfJMbJiu84D1013R74JOi0uNt8mZmn1rDvQNhUEtzwV5wJoRYJKCze9HedD1Fx8cLCVLBlMybKsCcChGc0YD5m7f4ttrnYYnFIjCFrd9dyJeqd7iFhm/dr6nfD13128Wf7RbLj1jRWd9wHHvfGFoAymNcESgsqabCx5DjiH5Mq/mrV75AREh3mwR4XudArY40qJ/7hD2bhbrh7uPxUx4iA2t6UBh6CPvac5jYG7z57yjbunZt7N5JVfWC9Eqrq4TEI1luPdUBHQhVn/v8UtSGFVj8qpqZAtj6Y6vGqhSww35/fGDDjuqkB1nasUDgqJKCi8qOitnKJGBhQhe2gfd5OxcpAOuxpc91NnULT+a7tyLequcn1Djqn63dyZgZeFtbfo0orxI3yM7rOHsPNQWoWF7ur9k6VIumINILMbGE4X7hSL4lrgtOKyD1+C0BErfari/voXQbnHEkirkLvip2wiV4Kaj59nX4kja2HpGc44vzd13yDn3pS/eRiZ8+GyyoKJI6Sb0TCWO8+dfXPZchKd5Arxq7tdoQbawBZJ/TcESZISFlZwXjaz34K/5uP4sE4nLCDFppZj89f+UPQVE82U2nSUrDZ35dRJiGFP0m9x9KngyetczJnUK6gSfpURYqASRdeqvsjSxLysDZteZW1xTKVJfENRLUPK4
 
 ingress:
   host: dev.orders.local

@@ -172,7 +172,67 @@ Para volver al valor por defecto, pon `180s`.
 
 ---
 
-## 6. Añadir una aplicación nueva
+## 6. Secretos sellados
+
+Las contraseñas viven cifradas en `apps/<app>/envs/<entorno>.yaml`. El
+controlador `sealed-secrets` (en `kube-system`) las descifra y crea el `Secret`
+que consumen los pods.
+
+```powershell
+kubectl get sealedsecret -A
+kubectl get pods -n kube-system -l name=sealed-secrets-controller
+```
+
+### Rotar una contraseña
+
+```powershell
+kubectl create secret generic tasks-db-credentials -n tasks-prod `
+  --from-literal=password=LA_NUEVA --dry-run=client -o yaml |
+  kubeseal --format yaml --controller-name sealed-secrets-controller --controller-namespace kube-system
+```
+
+Copia el valor de `encryptedData.password` a `database.passwordSecret.encrypted`
+del fichero de entorno correspondiente, commitea y push. Para producción, por
+pull request como cualquier otro cambio.
+
+El controlador actualiza el `Secret` en el siguiente sync, pero **los pods no
+recogen el valor nuevo solos**: `secretKeyRef` se lee al arrancar el contenedor.
+
+```powershell
+kubectl rollout restart deployment -n tasks-prod
+```
+
+### Añadir el secreto de una aplicación nueva
+
+Mismo comando, cambiando namespace y nombre. El nombre tiene que coincidir con
+`database.passwordSecret.name` del chart.
+
+**El texto cifrado está atado a namespace + nombre.** Reutilizar el de otro
+entorno no funciona: el controlador lo rechaza. Es deliberado — impide que un
+valor de desarrollo llegue a producción por copiar y pegar.
+
+### La clave privada
+
+Es lo único de la plataforma que no está en Git. Respaldo:
+
+```powershell
+kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml `
+  > <ruta-fuera-de-los-repos>\sealed-secrets-master.key
+```
+
+Restauración en un clúster nuevo, **antes** de aplicar el root:
+
+```powershell
+kubectl apply -f <ruta>\sealed-secrets-master.key
+kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+```
+
+Sin ese archivo, los valores cifrados del repositorio son inservibles en el
+clúster nuevo y hay que volver a sellarlos todos con la clave nueva.
+
+---
+
+## 7. Añadir una aplicación nueva
 
 ```
 apps/<nombre>/
@@ -202,7 +262,7 @@ Cuatro valores tienen que ser únicos o las apps chocan entre sí:
 
 ---
 
-## 7. Diagnóstico de fallos
+## 8. Diagnóstico de fallos
 
 ### `kubectl` da `connection refused`
 
@@ -283,7 +343,7 @@ Si ahí sale la versión nueva, `Ctrl+Shift+R` en el navegador.
 
 ---
 
-## 8. Arranque del clúster desde cero
+## 9. Arranque del clúster desde cero
 
 ```powershell
 minikube start
@@ -293,24 +353,34 @@ kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
 kubectl wait --for=condition=available --timeout=300s deployment --all -n argocd
 
-# Los Secrets no están en Git y hay que recrearlos
-kubectl create secret generic tasks-db-credentials -n tasks-dev     --from-literal=password=...
-kubectl create secret generic tasks-db-credentials -n tasks-staging --from-literal=password=...
-kubectl create secret generic tasks-db-credentials -n tasks-prod    --from-literal=password=...
+# Controlador de secretos sellados
+kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.38.4/controller.yaml
+kubectl rollout status deployment sealed-secrets-controller -n kube-system
 
-# El único kubectl apply de toda la plataforma
+# Restaurar la clave privada ANTES de desplegar nada, o los secretos del
+# repositorio no se podrán descifrar
+kubectl apply -f <ruta>\sealed-secrets-master.key
+kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+
+# El único kubectl apply de la plataforma en sí
 kubectl apply -f bootstrap\root.yaml
 ```
 
-Todo lo demás se reconstruye solo desde este repositorio.
+Todo lo demás se reconstruye solo desde este repositorio, **incluidas las
+contraseñas**: van cifradas en los ficheros de entorno y el controlador las
+descifra al aplicarlas.
 
-**El único estado que no vive en Git son los Secrets**, y es deliberado. En
-producción se resolvería con External Secrets Operator o Sealed Secrets, que
-permiten versionar el secreto cifrado.
+**El único estado que no vive en Git es la clave privada del controlador.** Y es
+la pieza correcta para dejar fuera: una sola clave maestra en lugar de una
+contraseña por entorno y por aplicación.
+
+> Sin ArgoCD ni Sealed Secrets instalados no hay nada que reconstruir: son las
+> herramientas que hacen posible el GitOps, no aplicaciones gestionadas por él.
+> Gestionar el controlador de secretos con ArgoCD sería un huevo y gallina.
 
 ---
 
-## 9. Acceso a la UI de ArgoCD
+## 10. Acceso a la UI de ArgoCD
 
 ```powershell
 $pw = kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}"

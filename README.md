@@ -54,13 +54,27 @@ el historial de git *es* el historial de despliegues.
 El `root` detecta los Applications nuevos y los despliega. **No se ejecuta
 `kubectl` en ningún momento.**
 
-## Qué NO va en este repositorio
+## Los secretos sí están aquí, cifrados
 
-**Secretos.** El repo es público y ArgoCD aplica todo lo que hay en él. Las
-contraseñas viven en `Secret` de Kubernetes creados fuera de banda; el chart
-solo guarda una referencia (`secretKeyRef`). En producción esto se resolvería
-con Sealed Secrets o External Secrets Operator, que permiten versionar el
-secreto cifrado.
+Las contraseñas viven en `apps/<app>/envs/<entorno>.yaml` como **SealedSecret**:
+cifradas con la clave pública del clúster. Solo el controlador
+`sealed-secrets` tiene la clave privada, y esa clave nunca sale del clúster —
+por eso el texto cifrado puede estar en un repositorio público.
+
+No confundir con un `Secret` normal, cuyo `data` es **base64**: codificación,
+no cifrado. Cualquiera lo descifra con un comando.
+
+Cada bloque está atado a **un namespace y un nombre**. El de `tasks-dev` no se
+puede reutilizar en `tasks-prod`, ni aunque la contraseña sea la misma: el
+controlador se niega. Eso impide que un valor de desarrollo acabe en producción
+por copiar y pegar.
+
+### Lo único que no está en Git
+
+La **clave privada del controlador**, respaldada fuera de los repositorios. Sin
+ella, un clúster nuevo no puede descifrar nada de lo que hay aquí. Ver
+[RUNBOOK.md](RUNBOOK.md) para el respaldo, la restauración y cómo rotar una
+contraseña.
 
 ## Convenciones
 

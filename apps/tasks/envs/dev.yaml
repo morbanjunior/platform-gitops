@@ -12,6 +12,11 @@ namespace:
   name: tasks-dev
 database:
   name: appdb_dev
+  passwordSecret:
+    # Encrypted for this namespace with the cluster's public key. Only the
+    # sealed-secrets controller can decrypt it, so this is safe in a public
+    # repository. Reseal with kubeseal to change it -- see RUNBOOK.
+    encrypted: AgAP1jADLbXsWI2/4WFgXWN5OwX8enjXpD2lmIOyYxQHUsf+CBwsfGyqc4xGFCkkLGyExph+CUIAU1+GzTTbV99kf3K1xJzJIm0V180jkaJbfp6vx1pkZmAqvRgAw0AqG+bOc7ydyHbHth0NmMAd3lU1q1gzr8Br0kALm/026s1AfTNfAWKQQOjibFJc72IVxfYCKWqR4i1ngpC99bWId6QDaYmo4iCVvlJLyfsG/HBgcF67BydqpDkh4A6ZXGehgFIiVZJfFN8hrZMmv+unZ7Bq1qUqdMS7J5RMgmNnCpE+Bn1/ZWPYA+tX63xy/HRTpuDFKY4jokOJ2JLnn6wihwtTYf+zqc+62CA53swQ/tcWL+XVwPceyxhXCh1oPOJx+zbcbLdx1kG+F5GOyszegccDhj4GMXRc5rGi67klPxyTNoLVH6PpT39KkiR8LtCXFtmdZPDskVkgQtroBmkAkr2FzPDhPhttes4Xr5XvKTfsoFAMCzAVBtFy05oDYs2EUshcWZ7HTgcMhxW/n38kHH1cxcFwaBKjps0fhuD+FzO2/VDKXWFm4aqO097PoR8npFjtx4MwPFgKACbHTuyKexH/D54x3xh5GlgmJTRV1LX62opgB6mxjQ+oeqDIGN40d10lcwm/EbVHcGMSgXSbEkLdj2QXm1G0Uit1WrPc18VvNfh15A2Z6O+mCzDpUV6mvRsul77Ko5iwtIJM
 ingress:
   host: dev.tasks.local
 backend:

@@ -1,4 +1,10 @@
-# Nothing rendered or secret belongs in a GitOps repository
+# SealedSecrets in apps/*/envs/ ARE committed on purpose: they are ciphertext
+# that only the in-cluster controller can read.
+#
+# What must never land here is the controller's PRIVATE key -- with it, every
+# sealed value in this repository becomes readable -- or a plaintext Secret.
+*.key
+*.pem
 *.secret.yaml
 secret*.yaml
 *.local.yaml
