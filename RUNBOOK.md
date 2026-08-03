@@ -183,29 +183,83 @@ kubectl get sealedsecret -A
 kubectl get pods -n kube-system -l name=sealed-secrets-controller
 ```
 
+Todo el mantenimiento se hace con `scripts/secrets.py`. Requiere `kubeseal` en el
+PATH y acceso al clúster:
+
+```powershell
+pip install "ruamel.yaml==0.18.10"
+python scripts\secrets.py list      # que gestiona la plataforma
+python scripts\secrets.py check     # los valores siguen siendo descifrables?
+```
+
+`check` sale con código distinto de cero si algún valor no se puede descifrar.
+Ejecútalo tras restaurar un respaldo, tras reconstruir un clúster, o de vez en
+cuando. Responde a *"¿siguen válidos mis secretos?"* antes de que lo responda un
+pod con `CreateContainerConfigError`.
+
 ### Rotar una contraseña
 
-```powershell
-kubectl create secret generic tasks-db-credentials -n tasks-prod `
-  --from-literal=password=LA_NUEVA --dry-run=client -o yaml |
-  kubeseal --format yaml --controller-name sealed-secrets-controller --controller-namespace kube-system
-```
-
-Copia el valor de `encryptedData.password` a `database.passwordSecret.encrypted`
-del fichero de entorno correspondiente, commitea y push. Para producción, por
-pull request como cualquier otro cambio.
-
-El controlador actualiza el `Secret` en el siguiente sync, pero **los pods no
-recogen el valor nuevo solos**: `secretKeyRef` se lee al arrancar el contenedor.
+Cuando cambia el **valor**:
 
 ```powershell
-kubectl rollout restart deployment -n tasks-prod
+python scripts\secrets.py rotate tasks prod
 ```
+
+Pide la contraseña sin eco (no queda en el historial de PowerShell), la sella
+para ese namespace y la escribe en el fichero de entorno. Con `--all-envs` lo
+hace para todos los entornos de la aplicación.
+
+Después:
+
+1. **Cambiar la contraseña en la base de datos** — el script no lo hace
+2. Commit y push (pull request para producción)
+3. `kubectl rollout restart deployment -n tasks-prod`
+
+Ese tercer paso hace falta porque `secretKeyRef` se lee **al arrancar el
+contenedor**: un pod vivo conserva el valor viejo aunque el Secret ya haya
+cambiado.
+
+### Rotar la clave de sellado
+
+Cuando cambia la **clave**, no la contraseña:
+
+```powershell
+python scripts\secrets.py reseal            # todos
+python scripts\secrets.py reseal tasks prod # uno
+```
+
+Usa `kubeseal --re-encrypt`: el controlador descifra con la clave con la que se
+selló y vuelve a cifrar con la actual. **No hace falta conocer ninguna
+contraseña**, y el script nunca la ve.
+
+Cuándo ejecutarlo: el controlador **rota su clave cada 30 días**. Conserva las
+viejas para descifrar, así que nada se rompe de inmediato — pero los valores de
+este repositorio siguen atados a claves cada vez más antiguas, y perder una (un
+respaldo incompleto basta) los deja irrecuperables. Resellar de vez en cuando
+mantiene todo sobre la clave actual.
+
+Los pods no se enteran: el Secret resultante es idéntico.
+
+### Recuperar una contraseña olvidada
+
+Con el respaldo de la clave privada, sin necesidad del clúster original:
+
+```powershell
+python scripts\secrets.py recover tasks prod --key <ruta>\sealed-secrets-master.key
+```
+
+Imprime el valor en texto plano en la terminal. Úsalo solo cuando de verdad
+haga falta.
 
 ### Añadir el secreto de una aplicación nueva
 
-Mismo comando, cambiando namespace y nombre. El nombre tiene que coincidir con
-`database.passwordSecret.name` del chart.
+```powershell
+python scripts\secrets.py rotate <app> <entorno>
+```
+
+El script descubre las aplicaciones recorriendo `apps/*/envs/*.yaml`, así que
+una aplicación nueva aparece sola en cuanto existe su carpeta. Lee el nombre y
+la clave del Secret de `chart/values.yaml` y el namespace del fichero de entorno.
 
 **El texto cifrado está atado a namespace + nombre.** Reutilizar el de otro
 entorno no funciona: el controlador lo rechaza. Es deliberado — impide que un

@@ -195,14 +195,20 @@ rendericen un Service con el mismo nombre en el mismo namespace se pisan, y con
 
 ### El secreto
 
+Una vez existan `chart/values.yaml` (con `database.passwordSecret.name`) y el fichero de
+entorno (con `namespace.name`):
+
 ```powershell
-kubectl create secret generic <app>-db-credentials -n <app>-<entorno> `
-  --from-literal=password=<valor> --dry-run=client -o yaml |
-  kubeseal --format yaml --controller-name sealed-secrets-controller --controller-namespace kube-system
+python scripts\secrets.py rotate <app> <entorno>
 ```
 
-El valor de `encryptedData` va a `database.passwordSecret.encrypted` en `envs/<entorno>.yaml`.
+Pide la contraseña sin eco, la sella para ese namespace y la escribe en el fichero de entorno.
 **Uno por entorno**: el cifrado está atado a namespace + nombre y no se puede reutilizar.
+
+```powershell
+python scripts\secrets.py list      # comprobar que aparecen todos
+python scripts\secrets.py check     # y que el cluster puede descifrarlos
+```
 
 ### Validar antes de commitear
 
