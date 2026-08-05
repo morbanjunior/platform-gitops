@@ -329,7 +329,23 @@ Es lo único de la plataforma que no está en Git. Respaldo:
 
 ```powershell
 kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml `
-  > <ruta-fuera-de-los-repos>\sealed-secrets-master.key
+  | Out-File -Encoding utf8 <ruta-fuera-de-los-repos>\sealed-secrets-master.key
+```
+
+`Out-File -Encoding utf8` y no `>`: la redirección de PowerShell 5.1 escribe
+UTF-16. `kubectl` lo acepta igualmente — se comprobó — pero deja un fichero que
+`grep`, `git diff` y casi cualquier herramienta de texto no pueden leer, y el
+día del incidente no es el momento de descubrir eso.
+
+La ruta va **fuera del árbol que contiene los repositorios**. No basta con que
+no esté versionado: es el fichero que no debe irse en un zip por accidente.
+
+**Un respaldo no comprobado no es un respaldo.** Validar en el momento de
+hacerlo, no cuando haga falta:
+
+```powershell
+kubectl apply --dry-run=client -f <ruta>\sealed-secrets-master.key
+kubectl apply --dry-run=server -f <ruta>\sealed-secrets-master.key
 ```
 
 Restauración en un clúster nuevo, **antes** de aplicar el root:
@@ -337,10 +353,23 @@ Restauración en un clúster nuevo, **antes** de aplicar el root:
 ```powershell
 kubectl apply -f <ruta>\sealed-secrets-master.key
 kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+kubectl rollout status deployment sealed-secrets-controller -n kube-system
+```
+
+El controlador genera su propia clave al instalarse, así que tras restaurar
+conviven dos. No es un problema: descifra con cualquiera que tenga, de modo que
+los ciphertexts del repositorio siguen funcionando. El `delete pod` no es
+opcional — la clave restaurada se lee al arrancar.
+
+Comprobación de que la restauración sirvió, antes de dar nada por bueno:
+
+```powershell
+python scripts\secrets.py check      # todos OK
 ```
 
 Sin ese archivo, los valores cifrados del repositorio son inservibles en el
-clúster nuevo y hay que volver a sellarlos todos con la clave nueva.
+clúster nuevo y hay que volver a sellarlos todos — lo que exige conocer las
+contraseñas reales de la base de datos.
 
 ---
 
@@ -518,26 +547,81 @@ Si ahí sale la versión nueva, `Ctrl+Shift+R` en el navegador.
 
 ## 9. Arranque del clúster desde cero
 
+> Ensayado de verdad el 2026-08-04, borrando el clúster entero y levantándolo
+> con estos pasos. Los tiempos y las notas de abajo salen de ese ensayo, no de
+> la teoría. Total: ~12 minutos hasta las 7 Applications en `Synced/Healthy`.
+
+Si se está reconstruyendo un clúster existente, **parar antes `minikube tunnel`**:
+mantiene abierto `.tunnel_lock` dentro del perfil y `minikube delete` falla al
+limpiarlo, dejando un perfil a medias que hay que borrar a mano.
+
 ```powershell
+minikube delete          # solo si se reconstruye
+
 minikube start
 minikube update-context
 
+# Los addons son POR CLÚSTER: minikube delete los resetea y un clúster nuevo
+# solo trae default-storageclass y storage-provisioner. Sin estos dos, el
+# Ingress no responde y los HPA se quedan en <unknown> para siempre.
+minikube addons enable ingress
+minikube addons enable metrics-server
+
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
-kubectl wait --for=condition=available --timeout=300s deployment --all -n argocd
+kubectl wait --for=condition=available --timeout=600s deployment --all -n argocd
 
 # Controlador de secretos sellados
 kubectl apply -f https://github.com/bitnami-labs/sealed-secrets/releases/download/v0.38.4/controller.yaml
 kubectl rollout status deployment sealed-secrets-controller -n kube-system
 
 # Restaurar la clave privada ANTES de desplegar nada, o los secretos del
-# repositorio no se podrán descifrar
+# repositorio no se podrán descifrar. Ver "La clave privada" en §6.
 kubectl apply -f <ruta>\sealed-secrets-master.key
 kubectl delete pod -n kube-system -l name=sealed-secrets-controller
+kubectl rollout status deployment sealed-secrets-controller -n kube-system
 
 # El único kubectl apply de la plataforma en sí
 kubectl apply -f bootstrap\root.yaml
 ```
+
+Y en una terminal de **Administrador** aparte, dejar corriendo:
+
+```powershell
+minikube tunnel
+```
+
+Sin el túnel los Ingress no responden en `127.0.0.1`. El fichero `hosts` debe
+tener los seis nombres (`dev.tasks.local`, `staging.tasks.local`, `tasks.local`
+y los tres equivalentes de `orders`); sobrevive al borrado del clúster, así que
+solo hace falta la primera vez.
+
+### Qué esperar, en orden
+
+`root` sincroniza `platform/`, y las sync waves marcan el ritmo: primero los dos
+`AppProject` (wave `-1`), después el `ApplicationSet` (wave `0`), que recorre
+`apps/*/envs/*.yaml` y genera una Application por fichero.
+
+| Momento | Estado |
+|---|---|
+| ~20 s tras el `apply` | 7 Applications, 3 AppProjects, 1 ApplicationSet |
+| ~1–4 min | `Progressing`, y algún `Degraded` transitorio mientras arrancan los pods |
+| ~5 min | Las 7 en `Synced/Healthy` |
+
+Un `Degraded` en ese intervalo no es un fallo: es una readiness probe esperando
+a que su dependencia arranque. Solo preocupa si sigue ahí pasados unos minutos.
+
+### Comprobar que la reconstrucción salió bien
+
+```powershell
+kubectl get application -n argocd -o custom-columns="NAME:.metadata.name,PROJ:.spec.project,SYNC:.status.sync.status,HEALTH:.status.health.status"
+python scripts\secrets.py check
+kubectl get ingress,hpa -A
+```
+
+Las 7 en `Synced/Healthy`, ninguna en el proyecto `default` salvo `root`, los
+seis secretos `OK`, seis Ingress y los HPA reportando CPU real (si dicen
+`<unknown>`, falta `metrics-server`).
 
 Todo lo demás se reconstruye solo desde este repositorio, **incluidas las
 contraseñas**: van cifradas en los ficheros de entorno y el controlador las
