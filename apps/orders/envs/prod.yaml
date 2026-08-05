@@ -14,20 +14,15 @@ namespace:
 database:
   name: appdb_prod
   passwordSecret:
-    # EMPTY ON PURPOSE, and it must not stay that way.
+    # Encrypted for the orders-prod namespace with the cluster's public key.
     #
-    # A SealedSecret is encrypted against this cluster's public key AND bound to
-    # this namespace, so it cannot be copied from staging -- that binding is
-    # exactly what stops a development password from being replayed into
-    # production. It has to be sealed here:
+    # The ciphertext is bound to that namespace AND to the Secret name, so it
+    # cannot be copied from staging even though it protects the same database
+    # user -- that binding is exactly what stops a development password from
+    # being replayed into production. Reseal with:
     #
     #   python scripts\secrets.py rotate orders prod
-    #
-    # While it is empty the chart renders no SealedSecret and expects the Secret
-    # to already exist in the namespace, which is how a cluster without the
-    # controller still works. The pods will sit in CreateContainerConfigError
-    # until one or the other is true.
-    encrypted: ""
+    encrypted: "AgBJvVGhwj8ispRi63o/Zk8rc2mzdrFKQARZKLGGRniXRHETQodSXhsT3hXa8hC3fXDZrZ8VWu5hEPCFlnDgNSswZ/Rku1bJaYPfUnij7MQWLPHkoinl+JEb4t/rnOQCpYAo9tkY2X0cU53q91qBWyzInJ3tJVnspHOLsJEp7ulzYw01kkYT5IOB12Y/3DQZRx+EbCo3mAIXnkosqmqnsLNrE8etj2EBT1RWghN7tCBhplc1nsoE+P0cCs9+rfnHohcs9zriJ7qE90OMTG4iQJXfxTGkwMTv9TlKjQmbOafo2a18q5XpXyezBeuYBA5TbVG0b7vyOJNOY9ckF0l1wjmKoVW4pkV5/nKa3zdWGXkFmjxPSIe4dqTUVBeLvVUm1IQiKDzKBRcs9L7G4QrMkT3IllENzVId2qRls/2AkKXpNFVIgJ02ttVc12ojBzjJzOGgDTi1lpgwu6ORFTRMxrs4DcFWh/zUQl8/0qbrsMBVGnQ1WQHkH+vn4+yZ1WM8DLIgBqfoVXEQkjvYZAa5CdySQLSR3lC7ACVIMs+p3eoL3AYoY8Oke2BZ96obUSzwuzkJJqbmNoVUeOywNaj3+PYK9X8WD1ShmmS2PUC8OHIj8cbHwozb0ftAqG7yvGUDVF9CexK29RpWqvPuj5U2Ynubo59/vBNwPlmJnmeupxuPR1UT+LQqAHUy4J4NUOy2xH0hIAXwT5kIQKHf"
 
 ingress:
   # No prefix: production owns the bare hostname.
