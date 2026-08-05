@@ -1,0 +1,112 @@
+# Application defaults: everything identical in every environment.
+# Anything that differs lives in envs/<environment>.yaml.
+
+app: orders
+
+# Only the gateway is exposed through the Ingress (see ingress.paths below).
+# api and inventory are ClusterIP-only: nothing outside the cluster can reach
+# them directly, which is what makes the gateway a real boundary rather than a
+# suggestion.
+components:
+  gateway:
+    image:
+      repository: morbanjunior/orders-gateway
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8000
+    service:
+      port: 8000
+    resources: {}
+    env:
+      # Kubernetes Service DNS, resolved by the chart. The same image gets
+      # compose service names locally -- it holds no knowledge of either
+      # environment.
+      - name: ORDERS_URL
+        value: 'http://{{ include "app.componentName" (dict "root" $ "component" "api") }}:{{ .Values.components.api.service.port }}'
+      - name: INVENTORY_URL
+        value: 'http://{{ include "app.componentName" (dict "root" $ "component" "inventory") }}:{{ .Values.components.inventory.service.port }}'
+    probes:
+      liveness:
+        path: /health
+        initialDelaySeconds: 5
+        periodSeconds: 15
+      # /ready reports unavailable when an upstream is down, so a gateway that
+      # can serve nothing stops receiving traffic.
+      readiness:
+        path: /ready
+        initialDelaySeconds: 5
+        periodSeconds: 10
+
+  api:
+    image:
+      repository: morbanjunior/orders-api
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8000
+    service:
+      port: 8000
+    resources: {}
+    database: true
+    redis: true
+    # /ready checks Postgres AND Redis. An orders pod that cannot publish would
+    # accept orders inventory never hears about, so it should leave the Service
+    # rather than take traffic.
+
+  inventory:
+    image:
+      repository: morbanjunior/orders-inventory
+      tag: ""
+      pullPolicy: IfNotPresent
+    # Scaling this out is safe: every replica joins the same Redis consumer
+    # group, so Redis hands each event to exactly one of them. They share the
+    # work rather than each applying the same deduction.
+    replicaCount: 1
+    port: 8000
+    service:
+      port: 8000
+    resources: {}
+    database: true
+    redis: true
+    env:
+      # The consumer name must be unique per replica or two pods would claim
+      # the same identity inside the group. The pod name already is unique, so
+      # the downward API supplies it for free.
+      - name: CONSUMER_NAME
+        valueFrom:
+          fieldRef:
+            fieldPath: metadata.name
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ""
+  annotations: {}
+  # One rule, one backend: everything goes to the gateway and the gateway
+  # decides.
+  paths:
+    - path: /
+      pathType: Prefix
+      service: gateway
+
+database:
+  enabled: true
+  host: host.minikube.internal
+  port: 5432
+  user: appuser
+  name: ""
+  passwordSecret:
+    name: orders-db-credentials
+    key: password
+    encrypted: ""     # set per environment -- a SealedSecret is bound to one namespace
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  port: 6379
+  storage: 1Gi
+  resources: {}

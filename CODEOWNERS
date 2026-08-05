@@ -4,14 +4,47 @@
 # cannot be merged without approval from its owner. This file plus branch
 # protection is what turns "a commit deploys to production" into a controlled
 # operation rather than an accident waiting to happen.
+#
+# See RUNBOOK.md, "Protección de la rama main", for the exact settings this
+# file depends on. Without them, everything here is a suggestion.
 
 # Default owner for anything not matched below.
 *                           @morbanjunior
 
-# Production values. Every deployment to production is a pull request that
-# changes one of these files, so this line is the production change control.
+# Image tags: every deployment is a pull request that changes one of these
+# files. staging and prod are promoted deliberately and need their owner.
+apps/*/envs/staging.yaml    @morbanjunior
 apps/*/envs/prod.yaml       @morbanjunior
 
-# Bootstrap and Application manifests define what exists in the cluster at all.
+# What exists in the cluster at all, and what each application is allowed to
+# do. platform/projects/ is the isolation between applications: widening a rule
+# there is a security change, not a configuration change.
 bootstrap/                  @morbanjunior
-apps/*/applications/        @morbanjunior
+platform/                   @morbanjunior
+
+# The shared chart. One edit here changes how every application in every
+# environment is rendered, which makes it the highest-blast-radius directory in
+# the repository.
+charts/                     @morbanjunior
+
+# How image tags get proposed in the first place. A change here could widen
+# what Renovate is allowed to touch beyond dev, or turn off the check that
+# stands in for a reviewer there.
+renovate.json5              @morbanjunior
+.github/                    @morbanjunior
+
+# ---------------------------------------------------------------------------
+# Deliberately UNOWNED. Must stay the last rule in the file: in CODEOWNERS the
+# last matching pattern wins, and a pattern with no owners clears ownership.
+#
+# dev is the one environment that updates without a human. Renovate opens the
+# pull request and GitHub merges it once Validate is green -- the rendered
+# manifests are the reviewer. Leaving @morbanjunior as owner here (via the
+# catch-all at the top) would mean every dev deployment waits on a person to
+# approve a two-line tag bump, which is the friction this repository is trying
+# to spend where it matters: staging and production.
+#
+# The scope is narrow on purpose. This is the ONLY path Renovate can write to
+# (see renovate.json5) and the only one that merges unattended. Everything else
+# in apps/ is still covered by the catch-all.
+apps/*/envs/dev.yaml

@@ -1,0 +1,109 @@
+{{/*
+One Deployment, one Service and (optionally) one HPA per entry in
+.Values.components.
+
+This file is the whole reason the platform has a single chart. Before it, every
+application carried its own copy of these three manifests per service, and a
+fix to a probe or a label had to be applied N times -- which in practice meant
+it was applied once and forgotten everywhere else.
+*/}}
+{{- $root := . }}
+{{- range $name, $c := .Values.components }}
+{{- $fullName := include "app.componentName" (dict "root" $root "component" $name) }}
+{{- $autoscaling := $c.autoscaling | default dict }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  # Wave 1: after the namespace, the decrypted Secret and Redis all exist.
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "app.labels" (dict "root" $root "component" $name) | nindent 4 }}
+spec:
+  # replicas is omitted when the HPA owns this Deployment. If it stayed, Helm
+  # and the HPA would fight over the same field on every sync -- and with
+  # ArgoCD selfHeal enabled that fight never ends.
+  {{- if not $autoscaling.enabled }}
+  replicas: {{ $c.replicaCount | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" (dict "root" $root "component" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.selectorLabels" (dict "root" $root "component" $name) | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ $name }}
+          image: "{{ $c.image.repository }}:{{ required (printf "components.%s.image.tag is required (set it in envs/<env>.yaml)" $name) $c.image.tag }}"
+          imagePullPolicy: {{ $c.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: {{ $c.port | default $c.service.port }}
+          {{- $env := include "app.componentEnv" (dict "root" $root "component" $c) }}
+          {{- if trim $env }}
+          env:
+            {{- trim $env | nindent 12 }}
+          {{- end }}
+          {{- include "app.probes" $c | nindent 10 }}
+          resources:
+            {{- toYaml ($c.resources | default dict) | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "app.labels" (dict "root" $root "component" $name) | nindent 4 }}
+spec:
+  # ClusterIP for everything. Only the components named in ingress.paths are
+  # reachable from outside, and they are reached through the Ingress -- never
+  # by exposing a Service directly.
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $c.service.port }}
+      targetPort: http
+  selector:
+    {{- include "app.selectorLabels" (dict "root" $root "component" $name) | nindent 4 }}
+{{- if $autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullName }}
+  # Wave 2: an HPA that appears before its Deployment reports <unknown> and
+  # logs errors until the target exists.
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    {{- include "app.labels" (dict "root" $root "component" $name) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullName }}
+  minReplicas: {{ $autoscaling.minReplicas }}
+  maxReplicas: {{ $autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # Percentage of resources.requests.cpu, not of node capacity. Without
+          # a CPU request the HPA has no baseline and reports <unknown>.
+          averageUtilization: {{ $autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}
+
+# Autoscaling is opt-in per component and per environment. It is disabled in
+# dev on purpose: it only burns laptop resources there and hides how the
+# application behaves on a single replica. And a component that serves static
+# files is I/O bound and costs almost no CPU -- an HPA there would be
+# autoscaling theatre.

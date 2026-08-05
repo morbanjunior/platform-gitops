@@ -1,0 +1,81 @@
+# Application defaults: everything that is the SAME in every environment.
+#
+# Layered on top of charts/app/values.yaml, and overridden in turn by
+# envs/<environment>.yaml. Anything that differs between dev, staging and prod
+# belongs there, not here. Nothing in this file should ever need editing to
+# deploy to a new environment.
+
+app: tasks
+
+# Resource names are stable across environments because each environment gets
+# its own namespace: tasks-backend in tasks-dev, tasks-staging and tasks-prod.
+components:
+  backend:
+    image:
+      repository: morbanjunior/tasks-api
+      tag: ""         # set per environment, rewritten by the pipeline
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8000
+    service:
+      port: 8000
+    resources: {}     # set per environment
+    database: true
+    env:
+      - name: CORS_ORIGINS
+        value: "*"
+    autoscaling:
+      enabled: false  # opt in per environment
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+
+  frontend:
+    image:
+      repository: morbanjunior/tasks-frontend
+      tag: ""
+      pullPolicy: IfNotPresent
+    replicaCount: 1
+    port: 8080
+    service:
+      port: 8080
+    resources: {}
+    # No environment variables and no database: this container serves static
+    # files and makes no routing decisions, so it has nothing to configure.
+    # That is why the same image runs unchanged in all three environments.
+    probes:
+      liveness:
+        path: /healthz
+        initialDelaySeconds: 5
+        periodSeconds: 15
+      readiness:
+        path: /healthz
+        initialDelaySeconds: 2
+        periodSeconds: 10
+
+ingress:
+  enabled: true
+  className: nginx
+  host: ""            # set per environment
+  annotations: {}
+  paths:
+    - path: /api
+      pathType: Prefix
+      service: backend
+    - path: /
+      pathType: Prefix
+      service: frontend
+
+# PostgreSQL runs outside the cluster, as a managed instance would. Only the
+# database name changes per environment; the password always comes from a
+# Secret created out of band.
+database:
+  enabled: true
+  host: host.minikube.internal
+  port: 5432
+  user: appuser
+  name: ""            # set per environment
+  passwordSecret:
+    name: tasks-db-credentials
+    key: password
+    encrypted: ""     # set per environment -- a SealedSecret is bound to one namespace

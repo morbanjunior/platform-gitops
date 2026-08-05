@@ -39,25 +39,67 @@ sincronizado (hasta 3 minutos) o el sync falló — ver §6.
 
 ---
 
-## 2. Desplegar una versión nueva (llega sola a dev)
+## 2. Desplegar una versión nueva a dev (no requiere intervención)
 
-En el **repo de código**, no aquí:
+El cambio de código entra en `main` por pull request revisado — `main` del repo
+de la aplicación tampoco acepta push directo. Después, en el **repo de código**,
+no aquí:
 
 ```powershell
 gh release create v1.0.5 -R morbanjunior/api-backend --title "v1.0.5" --notes "..."
 gh run watch -R morbanjunior/api-backend
 ```
 
-Esto ejecuta `test` → `build-and-push` → `update-dev`. En ≤3 minutos, **dev**
-corre la versión nueva. Staging y producción no se enteran.
+Esto ejecuta `test` → `build-and-push` y **ahí se detiene**: publica las
+imágenes y no toca este repositorio. El pipeline ya no tiene permiso para
+escribir aquí.
+
+A partir de ahí **dev se actualiza solo**. Renovate corre cada hora en este
+repositorio, abre un pull request sobre `apps/<app>/envs/dev.yaml` y GitHub lo
+mergea en cuanto `Validate` pasa. Nadie tiene que aprobar nada.
+
+```powershell
+# No esperar a la hora en punto
+gh workflow run renovate.yml -R morbanjunior/platform-gitops
+
+# Ver qué pasó
+gh pr list -R morbanjunior/platform-gitops --label deploy --state merged --limit 5
+```
+
+Staging y producción no se enteran: solo cambian por promoción (§3).
+
+**Si el PR de dev sigue abierto**, es que `Validate` está en rojo. Eso es el
+sistema funcionando: dev se queda en la versión anterior en vez de desplegar
+manifiestos que el apiserver rechazaría.
+
+```powershell
+gh pr list -R morbanjunior/platform-gitops --label deploy --state open
+gh pr checks <n> -R morbanjunior/platform-gitops
+```
+
+> Por qué dev no tiene revisor humano y staging sí: la revisión de dev no
+> contesta ninguna pregunta que la del repo de código no haya contestado ya. En
+> staging y producción sí hay una pregunta nueva — *¿debe esta versión correr
+> aquí, ahora?* — y ahí la puerta se queda. Lo que **no** cambia en ningún
+> entorno: nada entra en `main` sin pull request. Renovate no hace push; propone
+> y la política aprueba (§11).
 
 ---
 
 ## 3. Promover a staging o producción
 
+Las dos aplicaciones tienen los tres entornos y el mismo workflow. Se promueve
+siempre desde el entorno de abajo, y **nunca se reconstruye la imagen**: se
+mueve el mismo artefacto que ya lleva tiempo corriendo.
+
 ```powershell
+# tasks
 gh workflow run promote.yml -R morbanjunior/api-backend `
   -f version=v1.0.5 -f environment=staging
+
+# orders
+gh workflow run promote.yml -R morbanjunior/orders-platform `
+  -f version=v1.0.1 -f environment=prod
 ```
 
 Esto **no despliega**: abre un Pull Request contra este repositorio.
@@ -95,10 +137,25 @@ git push
 
 ArgoCD devuelve el entorno a la versión anterior en el siguiente poll.
 
-**Urgente** (producción caída, sin tiempo para el ciclo de PR): editar
-`apps/<app>/envs/prod.yaml` a la versión buena, commitear a `main` y push. Saltarse
-la revisión es una decisión consciente, no el procedimiento normal — y queda
-registrada en el historial igual que cualquier otra.
+**Urgente** (producción caída): sigue siendo un pull request — `main` no acepta
+push directo de nadie, y esa es exactamente la protección que no se quiere
+desactivar en medio de un incidente. Lo que se acorta es el ciclo, no el
+control:
+
+```powershell
+git checkout -b rollback/tasks-prod
+git revert <sha>
+git push origin rollback/tasks-prod
+gh pr create -R morbanjunior/platform-gitops --fill
+# Un revisor aprueba; Validate tarda ~1 minuto
+gh pr merge --merge --delete-branch
+```
+
+Un `git revert` es el diff más fácil de aprobar que existe: devuelve el fichero
+a un estado que ya estuvo en producción. Si no hay ningún revisor disponible y
+el servicio está caído, el propietario del repositorio puede desactivar
+temporalmente la regla de rama — decisión consciente, registrada en el audit log
+de GitHub, y que se vuelve a activar en cuanto pasa el incidente.
 
 > Lo que **no** se hace nunca: `kubectl set image` o `kubectl edit`. Con
 > `selfHeal: true` ArgoCD lo revierte en segundos y habrás perdido el tiempo
@@ -259,7 +316,8 @@ python scripts\secrets.py rotate <app> <entorno>
 
 El script descubre las aplicaciones recorriendo `apps/*/envs/*.yaml`, así que
 una aplicación nueva aparece sola en cuanto existe su carpeta. Lee el nombre y
-la clave del Secret de `chart/values.yaml` y el namespace del fichero de entorno.
+la clave del Secret de `apps/<app>/values.yaml` y el namespace del fichero de
+entorno.
 
 **El texto cifrado está atado a namespace + nombre.** Reutilizar el de otro
 entorno no funciona: el controlador lo rechaza. Es deliberado — impide que un
@@ -288,18 +346,30 @@ clúster nuevo y hay que volver a sellarlos todos con la clave nueva.
 
 ## 7. Añadir una aplicación nueva
 
+Ya no se escribe un chart. `charts/app` renderiza cualquier aplicación a partir
+de su lista de componentes; una aplicación nueva son **ficheros de valores**:
+
 ```
 apps/<nombre>/
-├── chart/          Chart.yaml, values.yaml (defaults + huecos ""), templates/
-├── envs/           dev.yaml, staging.yaml, prod.yaml
-└── applications/   dev.yaml, staging.yaml, prod.yaml
+├── values.yaml     app, components (image, port, probes, database, redis, env),
+│                   ingress.paths, database.passwordSecret.name
+└── envs/           dev.yaml, staging.yaml, prod.yaml
+                    environment, namespace.name, ingress.host, database.name,
+                    el ciphertext, y los tag: de cada componente
 ```
+
+Y un `AppProject` en `platform/projects/<nombre>.yaml`, copiando el de una app
+existente y ajustando el nombre, el glob de namespace y los tipos de recurso que
+la aplicación usa realmente.
+
+No hay que crear ninguna `Application`: el `ApplicationSet` recorre
+`apps/*/envs/*.yaml` y genera una por fichero de entorno.
 
 Antes de commitear:
 
 ```powershell
-helm lint apps\<nombre>\chart -f apps\<nombre>\chart\values.yaml -f apps\<nombre>\envs\dev.yaml
-helm template <nombre> apps\<nombre>\chart -f apps\<nombre>\chart\values.yaml -f apps\<nombre>\envs\dev.yaml
+helm lint charts\app -f apps\<nombre>\values.yaml -f apps\<nombre>\envs\dev.yaml
+helm template <nombre>-dev charts\app -f apps\<nombre>\values.yaml -f apps\<nombre>\envs\dev.yaml
 ```
 
 Y lo que hay que preparar **fuera** de Git:
@@ -308,11 +378,11 @@ Y lo que hay que preparar **fuera** de Git:
 kubectl create secret generic <nombre>-db-credentials -n <nombre>-dev --from-literal=password=...
 ```
 
-Después: commit y push. El `root` detecta los `Application` nuevos y despliega.
-**No se ejecuta `kubectl apply`.**
+Después: pull request. Al mergear, el `ApplicationSet` genera los `Application`
+nuevos y ArgoCD despliega. **No se ejecuta `kubectl apply`.**
 
 Cuatro valores tienen que ser únicos o las apps chocan entre sí:
-`namespace.name`, `fullnameOverride`, `ingress.host`, `image.repository`.
+`namespace.name`, `app`, `ingress.host` y los `components.*.image.repository`.
 
 ---
 
@@ -503,10 +573,166 @@ minikube tunnel
 
 ---
 
+## 11. Protección de la rama `main`
+
+Esta configuración **no vive en el repositorio** — es ajuste de GitHub, y sin
+ella todo lo demás (CODEOWNERS, el flujo de PR, Renovate) es una recomendación,
+no un control. Se documenta aquí para que sea reproducible en otra organización
+o después de recrear el repositorio.
+
+`main` es la rama que ArgoCD sincroniza. Escribir en ella *es* desplegar.
+
+### Regla de rama (Settings → Rules → Rulesets, target `main`)
+
+| Ajuste | Valor |
+|---|---|
+| Require a pull request before merging | sí |
+| Required approvals | **0** |
+| Require review from Code Owners | **sí** |
+| Dismiss stale approvals when new commits are pushed | sí |
+| Require status checks to pass | sí → **Validate** |
+| Block force pushes | sí |
+| Restrict deletions | sí |
+| **Bypass list** | **solo `@morbanjunior`** (ver abajo) |
+| Allow auto-merge (Settings → General) | sí |
+
+Lo que importa es **quién NO está** en la lista de bypass: ningún bot. Ni
+Renovate, ni el `CONFIG_REPO_TOKEN` de `promote.yml`. Esa es la diferencia con
+el diseño anterior, donde un pipeline escribía en `main` directamente y la
+protección solo aplicaba a las personas.
+
+### Por qué el mantenedor sí está en la lista
+
+Por una limitación de GitHub, no por comodidad: **no se puede aprobar el propio
+pull request**. Los PR de promoción los abre `promote.yml` con un PAT que es de
+`@morbanjunior`, así que figura como autor de un PR que exige la aprobación de
+`@morbanjunior`. Sin el bypass, staging y producción serían inmergeables.
+
+La puerta sigue siendo real: el PR existe, `Validate` tiene que estar verde, el
+merge es un acto deliberado y cada uso del bypass queda en el audit log de
+GitHub. Lo que no hay es una segunda persona, y eso no lo arregla una regla.
+
+> Cuando haya un segundo mantenedor, vaciar la lista y exigir su aprobación es
+> un cambio de una casilla. La alternativa sin esperar a nadie es abrir los PR
+> de promoción desde una cuenta máquina distinta, para que el autor no sea quien
+> aprueba.
+
+### Por qué `Required approvals: 0` no debilita producción
+
+Parece laxo y no lo es. Quien decide si hace falta una persona es
+`CODEOWNERS`, ruta por ruta:
+
+| Ruta | Propietario | Qué hace falta para mergear |
+|---|---|---|
+| `apps/*/envs/dev.yaml` | **ninguno**, deliberadamente | solo que `Validate` pase → auto-merge |
+| `apps/*/envs/staging.yaml` | `@morbanjunior` | su aprobación |
+| `apps/*/envs/prod.yaml` | `@morbanjunior` | su aprobación |
+| `charts/`, `platform/`, `bootstrap/`, `.github/` | `@morbanjunior` | su aprobación |
+| cualquier otra cosa | catch-all `*` | su aprobación |
+
+La aprobación genérica que se quita es la que bloqueaba la única ruta que debe
+fluir sola. Todo lo demás sigue exigiendo al propietario, y *Require review from
+Code Owners* es lo que lo impone.
+
+> Si algún día `dev.yaml` vuelve a tener propietario, los pull requests de
+> Renovate dejan de auto-mergearse y se quedan abiertos para siempre. La regla
+> sin propietario está al final de `CODEOWNERS` porque ahí gana la última
+> coincidencia; moverla arriba la desactiva en silencio.
+
+### Token `RENOVATE_TOKEN`
+
+Fine-grained, con acceso **solo** a `platform-gitops`. Vive como secret en este
+mismo repositorio y lo usa `renovate.yml`:
+
+| Permiso | Motivo |
+|---|---|
+| Contents: Read and write | crear la rama del PR |
+| Pull requests: Read and write | abrirlo y marcarlo para auto-merge |
+| Issues: Read and write | el dependency dashboard |
+
+**No sirve `secrets.GITHUB_TOKEN`.** GitHub se niega a disparar workflows desde
+eventos creados con el token de ambiente — es su protección contra que un
+workflow se dispare a sí mismo en bucle. Un PR abierto con él nunca ejecutaría
+`Validate`, y como `Validate` es un check obligatorio que nunca reporta, el
+auto-merge esperaría indefinidamente. Un token distinto rompe ese bucle.
+
+> Alternativa: instalar la **GitHub App oficial de Renovate** en lugar del
+> workflow. Sus PRs vienen de la app, así que disparan `Validate` igual. Se
+> gana no gestionar un PAT; se pierde tener la ejecución dentro del repositorio.
+
+### Token `CONFIG_REPO_TOKEN`
+
+Fine-grained, con acceso **solo** a `platform-gitops`. Lo usa `promote.yml` en
+los repos de aplicación:
+
+| Permiso | Motivo |
+|---|---|
+| Contents: Read and write | crear la rama de promoción |
+| Pull requests: Read and write | abrir el pull request |
+
+`Contents: write` suena a mucho, pero con la regla de rama activa **no permite
+escribir en `main`**: solo crear ramas. El único camino a `main` sigue siendo un
+PR aprobado.
+
+Los repos de aplicación ya no necesitan nada más: `release.yml` no toca este
+repositorio.
+
+### Verificar que está bien puesto
+
+```powershell
+# Debe ser RECHAZADO
+git checkout main; git commit --allow-empty -m "test"; git push
+
+# Un PR que toque prod.yaml debe ser RECHAZADO sin la aprobación del CODEOWNER
+gh pr merge <n> -R morbanjunior/platform-gitops --merge
+```
+
+Si alguno de los dos pasa, la regla no está activa o alguien está en la lista de
+bypass.
+
+Y al revés, para comprobar que dev sí fluye: abrir un PR que toque **solo**
+`apps/tasks/envs/dev.yaml` y mirar en la UI que GitHub **no** pide revisión de
+propietario. Ese es el punto más frágil de toda la configuración y hay que verlo
+con los ojos, no deducirlo.
+
+### La otra mitad: `main` de los repos de código
+
+Mismo principio en `api-backend` y `orders-platform`. El cambio entra por rama y
+pull request; nadie hace push a `main`:
+
+| Ajuste en `main` | Valor |
+|---|---|
+| Require a pull request before merging | sí, **1** aprobación |
+| Require status checks to pass | **CI** (`ci.yml`) |
+| Dismiss stale approvals | sí |
+| Block force pushes | sí |
+| Bypass list | solo `@morbanjunior`, por el mismo motivo de arriba |
+
+El release se corta de `main` ya revisado, y `release.yml` vuelve a pasar los
+tests sobre ese commit exacto antes de construir nada. Así la imagen que acaba
+en producción es siempre código que pasó por revisión **y** por CI, aunque el
+release se corte de un tag antiguo.
+
+---
+
 ## Entornos
+
+**tasks**
 
 | | Namespace | Host | Base de datos | Cómo se actualiza |
 |---|---|---|---|---|
-| dev | `tasks-dev` | dev.tasks.local | `appdb_dev` | Automático en cada release |
-| staging | `tasks-staging` | staging.tasks.local | `appdb_staging` | Pull request |
-| prod | `tasks-prod` | tasks.local | `appdb_prod` | Pull request + CODEOWNER |
+| dev | `tasks-dev` | dev.tasks.local | `appdb_dev` | **Automático**: Renovate + auto-merge |
+| staging | `tasks-staging` | staging.tasks.local | `appdb_staging` | `promote.yml` → PR + revisión |
+| prod | `tasks-prod` | tasks.local | `appdb_prod` | `promote.yml` → PR + CODEOWNER |
+
+**orders**
+
+| | Namespace | Host | Base de datos | Cómo se actualiza |
+|---|---|---|---|---|
+| dev | `orders-dev` | dev.orders.local | `appdb_dev` | **Automático**: Renovate + auto-merge |
+| staging | `orders-staging` | staging.orders.local | `appdb_staging` | `promote.yml` → PR + revisión |
+| prod | `orders-prod` | orders.local | `appdb_prod` | `promote.yml` → PR + CODEOWNER |
+
+> `orders-prod` es nuevo. Antes de la primera promoción hay que sellar su
+> secreto — `python scripts\secrets.py rotate orders prod` — o los pods se
+> quedan en `CreateContainerConfigError` esperando un Secret que no existe.

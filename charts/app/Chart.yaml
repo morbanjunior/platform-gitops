@@ -1,0 +1,17 @@
+apiVersion: v2
+name: app
+description: >-
+  Generic application chart for this platform. One chart renders every
+  application: a map of components (each a Deployment + Service, optionally
+  autoscaled), an optional Ingress, an optional external database with its
+  SealedSecret, and an optional in-cluster Redis.
+type: application
+
+# Chart version: how this packaging evolves. Bump it when templates change.
+# It is shared now, so a bump here touches every application -- which is the
+# point: a fix to the deployment pattern reaches all of them at once.
+version: 1.0.0
+
+# Informational only. The tags actually deployed live in the per-environment
+# values files, because that is what the promotion pipeline rewrites.
+appVersion: "1.0.0"

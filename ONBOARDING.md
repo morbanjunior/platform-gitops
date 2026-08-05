@@ -86,8 +86,31 @@ Los tres workflows entran en **su** repositorio, no en este:
 | Workflow | Dispara con | Qué hace |
 |---|---|---|
 | `ci.yml` | push y pull request | Lint y tests. No despliega nada |
-| `release.yml` | publicar un Release | Test → construir imágenes → actualizar `dev` |
+| `release.yml` | publicar un Release | Test → construir y publicar imágenes. **No despliega** |
 | `promote.yml` | manual (`workflow_dispatch`) | Abre un Pull Request contra este repositorio |
+
+Ningún workflow del equipo escribe en `main` de este repositorio. `release.yml` solo publica
+imágenes; a `dev` llega por un pull request que abre Renovate desde aquí y que se mergea solo
+en cuanto `Validate` pasa, y a staging y producción por el pull request de `promote.yml`, que
+sí necesita una persona. En los tres casos, **el merge es el despliegue**.
+
+### Protección de `main` en el repositorio del equipo
+
+La otra mitad del ciclo: el cambio de código entra por rama y pull request, nadie hace push a
+`main`. Se configura en **su** repositorio (Settings → Rules → Rulesets, target `main`):
+
+| Ajuste | Valor |
+|---|---|
+| Require a pull request before merging | sí, 1 aprobación |
+| Require status checks to pass | **CI** (`ci.yml`) |
+| Dismiss stale approvals when new commits are pushed | sí |
+| Block force pushes | sí |
+| Bypass list | vacía |
+
+El release se corta de `main` ya revisado. `release.yml` hace checkout del tag del Release y
+vuelve a pasar los tests sobre ese commit exacto antes de construir nada — así la imagen que
+acaba en producción es siempre código que pasó por revisión **y** por CI, aunque alguien corte
+un release desde un tag antiguo donde nadie garantiza que CI llegara a ejecutarse.
 
 Y sus secrets:
 
@@ -97,13 +120,16 @@ gh secret set DOCKERHUB_TOKEN    -R <owner>/<repo-de-la-app>
 gh secret set CONFIG_REPO_TOKEN  -R <owner>/<repo-de-la-app>
 ```
 
-`CONFIG_REPO_TOKEN` es un token fine-grained acotado **solo a este repositorio de
-plataforma**, con `Contents: Read and write` y `Pull requests: Read and write`. Nunca con
-acceso al repositorio de la propia aplicación: un runner comprometido no debe poder reescribir
-el workflow que lo ejecuta.
+`CONFIG_REPO_TOKEN` lo usa **solo `promote.yml`**. Es un token fine-grained acotado a este
+repositorio de plataforma, con `Contents: Read and write` y `Pull requests: Read and write`.
+Nunca con acceso al repositorio de la propia aplicación: un runner comprometido no debe poder
+reescribir el workflow que lo ejecuta.
+
+`Contents: write` suena a mucho, pero con la protección de rama de RUNBOOK §11 **no permite
+escribir en `main`**: solo crear la rama del pull request.
 
 **Este pipeline no tiene kubeconfig ni credenciales del clúster.** Su privilegio máximo es
-escribir YAML y abrir PRs en un repositorio de configuración.
+proponer un cambio de YAML en un repositorio de configuración.
 
 ---
 
@@ -114,10 +140,9 @@ gh release create v1.0.0 -R <owner>/<repo-de-la-app> --title "v1.0.0" --notes ".
 gh run watch -R <owner>/<repo-de-la-app>
 ```
 
-⚠️ **En el primer release, el job `update-dev` va a fallar.** Intenta escribir en
-`apps/<app>/envs/dev.yaml`, que aún no existe en este repositorio. Es esperado: los jobs que
-importan (`test` y las imágenes) sí completan. Se relanza al terminar la fase 6 con
-`gh run rerun --failed`.
+El pipeline construye y publica las imágenes, y ahí termina: no toca este repositorio. Por eso
+el primer release funciona aunque `apps/<app>/` todavía no exista. Cuando exista, Renovate
+empezará a proponer los tags nuevos por pull request.
 
 Y **hacer públicas las imágenes** en el registro, o el clúster no podrá descargarlas. Docker
 Hub crea los repositorios privados por defecto en el primer push:
@@ -154,48 +179,71 @@ Los namespaces también los crea el chart; crearlos antes solo evita que los pod
 
 ## Fase 6 — Crear `apps/<app>/`
 
+**No se escribe ningún chart.** `charts/app` renderiza cualquier aplicación a partir de su
+lista de componentes, así que dar de alta una es escribir ficheros de valores:
+
 ```
 apps/<app>/
-├── chart/
-│   ├── Chart.yaml
-│   ├── values.yaml          # defaults + huecos ""
-│   └── templates/
-│       ├── _helpers.tpl
-│       ├── namespace.yaml
-│       ├── sealed-secret.yaml
-│       ├── ingress.yaml
-│       └── <servicio>.yaml  # Deployment + Service por componente
-├── envs/
-│   ├── dev.yaml
-│   ├── staging.yaml
-│   └── prod.yaml
-└── applications/
+├── values.yaml              # la forma de la aplicación
+└── envs/
     ├── dev.yaml
     ├── staging.yaml
     └── prod.yaml
 ```
 
+Más un `AppProject` en `platform/projects/<app>.yaml` — copiar el de una aplicación existente
+y ajustar el nombre, el glob de namespaces y la lista de tipos de recurso que la aplicación
+usa realmente. Es lo que impide que un error en esta aplicación toque los namespaces de otra.
+
+No hay que crear ninguna `Application`: el `ApplicationSet` de
+`platform/applicationsets/apps.yaml` recorre `apps/*/envs/*.yaml` y genera una por fichero.
+
 ### La regla que gobierna el reparto
 
-**El chart describe la FORMA de la aplicación. `envs/` describe ESTE entorno.**
+**`values.yaml` describe la FORMA de la aplicación. `envs/` describe ESTE entorno.**
 
-Al chart: todo lo que es igual en todos los entornos (qué recursos existen, qué puertos, qué
-probes, el nombre del repositorio de las imágenes).
+A `values.yaml`: qué componentes existen, sus puertos, sus probes, si usan base de datos o
+Redis, sus variables de entorno, las rutas del Ingress y el repositorio de cada imagen.
 
 A `envs/`: namespace, host del Ingress, nombre de la base de datos, tags de las imágenes,
 réplicas, recursos, HPA, y el secreto cifrado.
 
-Nunca un chart por entorno: divergen, y el fallo aparece solo en producción.
+Nunca un fichero de valores por entorno que duplique la forma: divergen, y el fallo aparece
+solo en producción.
+
+### Cómo se declara un componente
+
+```yaml
+components:
+  <nombre>:                     # el recurso será <app>-<nombre>
+    image: { repository: <owner>/<imagen>, tag: "", pullPolicy: IfNotPresent }
+    replicaCount: 1
+    port: 8000                  # containerPort
+    service: { port: 8000 }
+    database: true              # inyecta DB_HOST/PORT/USER/NAME/PASSWORD
+    redis: false                # inyecta REDIS_HOST/REDIS_PORT
+    env: []                     # variables extra; pasan por `tpl`, así que
+                                # pueden referenciar a otro componente por nombre
+    probes:                     # por defecto /health y /ready
+      liveness:  { path: /health, initialDelaySeconds: 10, periodSeconds: 15 }
+      readiness: { path: /ready,  initialDelaySeconds: 5,  periodSeconds: 10 }
+```
+
+`tag: ""` es deliberado: la plantilla usa `required`, así que un tag sin poner rompe el
+`helm template` del pull request en vez de desplegar algo indefinido.
+
+Solo los componentes listados en `ingress.paths` son alcanzables desde fuera. El resto son
+ClusterIP y solo existen para el resto de la aplicación.
 
 ### Cuatro valores que deben ser únicos o las apps chocan
 
-`namespace.name`, `fullnameOverride`, `ingress.host` e `image.repository`. Dos charts que
-rendericen un Service con el mismo nombre en el mismo namespace se pisan, y con
-`selfHeal: true` entran en un bucle de sobrescritura mutua.
+`namespace.name`, `app`, `ingress.host` y los `components.*.image.repository`. Dos
+aplicaciones que rendericen un Service con el mismo nombre en el mismo namespace se pisan, y
+con `selfHeal: true` entran en un bucle de sobrescritura mutua.
 
 ### El secreto
 
-Una vez existan `chart/values.yaml` (con `database.passwordSecret.name`) y el fichero de
+Una vez existan `apps/<app>/values.yaml` (con `database.passwordSecret.name`) y el fichero de
 entorno (con `namespace.name`):
 
 ```powershell
@@ -213,8 +261,8 @@ python scripts\secrets.py check     # y que el cluster puede descifrarlos
 ### Validar antes de commitear
 
 ```powershell
-helm lint apps\<app>\chart -f apps\<app>\chart\values.yaml -f apps\<app>\envs\dev.yaml
-helm template <app> apps\<app>\chart -f apps\<app>\chart\values.yaml -f apps\<app>\envs\dev.yaml
+helm lint charts\app -f apps\<app>\values.yaml -f apps\<app>\envs\dev.yaml
+helm template <app>-dev charts\app -f apps\<app>\values.yaml -f apps\<app>\envs\dev.yaml
 ```
 
 Repetir con cada entorno. Es lo mismo que hará `validate.yml` en el pull request, y descubrir
@@ -226,24 +274,23 @@ un error aquí cuesta segundos.
 
 ```powershell
 git pull --rebase
-git add apps/<app>
+git checkout -b onboard/<app>
+git add apps/<app> platform/projects/<app>.yaml
 git status
 git commit -m "feat: onboard <app> in dev and staging"
-git push
+git push origin onboard/<app>
+gh pr create -R morbanjunior/platform-gitops --fill
 ```
+
+Un pull request, como cualquier otro cambio: `main` no acepta push directo (ver RUNBOOK §11).
+Con `Validate` en verde y la aprobación, se mergea.
 
 **Eso es todo.** No hay `kubectl apply`, no se toca `bootstrap/root.yaml`, no se toca ninguna
-otra aplicación. El `root` descubre los `Application` nuevos por el patrón
-`*/applications/*.yaml`.
+otra aplicación. El `ApplicationSet` descubre los entornos nuevos recorriendo
+`apps/*/envs/*.yaml` y genera sus `Application`.
 
-> `git pull --rebase` no es cortesía: en un repositorio GitOps escriben también los pipelines
-> y los merges de promoción. Tú no eres el único autor.
-
-Después, relanzar el job del primer release:
-
-```powershell
-gh run rerun --failed -R <owner>/<repo-de-la-app>
-```
+> `git pull --rebase` no es cortesía: en un repositorio GitOps escriben también Renovate y los
+> merges de promoción. Tú no eres el único autor.
 
 ---
 
@@ -292,8 +339,10 @@ pipeline.
 | `CreateContainerConfigError` | Falta el Secret en ese namespace |
 | `Running` pero `0/1` | La readiness probe falla: no alcanza sus dependencias |
 | La SealedSecret no crea su Secret | Ya existe uno creado a mano. Ver `RUNBOOK.md` §8 |
-| El Application no aparece | El fichero no encaja con `apps/*/applications/*.yaml` |
-| `update-dev` falla con 403 | Al token le falta acceso a este repositorio |
+| El Application no aparece | El fichero no encaja con `apps/*/envs/*.yaml`, o le falta `environment:` / `namespace.name` |
+| El Application queda en `Unknown` con error de proyecto | Falta `platform/projects/<app>.yaml`, o su nombre no coincide con la carpeta |
+| `SyncError: not permitted in project` | El `AppProject` no lista ese namespace o ese tipo de recurso |
+| `git push` de promoción falla porque la rama existe | Ya hay un PR abierto para esa versión y entorno. Mergearlo, no reintentar |
 | `gh pr create` falla con 403 | Al token le falta `Pull requests: write` |
 
 ---
@@ -305,6 +354,7 @@ pipeline.
 - [ ] Los tres workflows están en el repositorio del equipo y su CI está en verde
 - [ ] Las imágenes de la primera versión existen y son accesibles desde el clúster
 - [ ] `apps/<app>/` valida en local para **todos** los entornos
+- [ ] `platform/projects/<app>.yaml` existe y lista solo lo que la aplicación usa
 - [ ] Los secretos están sellados, uno por entorno
 - [ ] Las Applications aparecen `Synced/Healthy`
 - [ ] Una petición real por el Ingress responde

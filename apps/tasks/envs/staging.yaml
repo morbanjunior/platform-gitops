@@ -16,30 +16,31 @@ database:
     encrypted: AgDFHT6iaQFad6Suz8Y3zcbzf4qqMWoZl4GjBCIeZT54kGNMHns4/bJey3cksuvTvYWzG+qMXUznJDIf4Di08iSCuDATc8q/SFTl0i9D+fJBfXNJGgYJ5hTvw7pGlsIkjLIuT8NbglKbv835BwwiTRF4TLxKEZcMJ1lIfLAK6d96vLCAimFuax+ktvhA29MtxLxqwXCfUXpUsbiBBnirBz02tUf8ukC8nC2B3HdHDpx/METRGNurSDT9+aAHAAy/vRaHQ8ayWVEwKf9TO48vpfXu96P5Js8p1ch0oRcwVoqQqAaQipl8Q54CUt/FKNP5AMvjRboHG0oAndOx6a5wKDn27fz3USxw9VAqhpihVBOHIt8mpAxmUlqC8zf5w4I/9kWzWWEZ2Y4ZmYmljyIvKE7755X5lERAGjnPQQUS07ugECF6+D2vc7GmCXohdmKUZFKor2BPV9HxAR8xP+QbK279bfodZhtoURTsCjjTqbusLvhBc85Y1vdW1p7PX5uZqvpOlJJFYL9E1/MgUXrDNiQyj6dVWVyZO5jO9tsUAm9g+BNr7LXazTBdAKLAm0BPO2Ws9IEbCCHjPqDcWOYa/F4LOMRrfTCY8gOmYTrMXwhn05ESaxo9S+eiArNyDaM9YdyMKr3a4+5azapHt5ufxXvtlpmzLIRuyx0Dk37IYJr5Cqn6Lb7ncDi2v0zMCkT6UkXVSOHOaXfeHeee
 ingress:
   host: staging.tasks.local
-backend:
-  image:
-    tag: v1.0.4
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-  autoscaling:
-    # On, so the HPA configuration itself is exercised before prod depends on it.
-    enabled: true
-    minReplicas: 1
-    maxReplicas: 3
-    targetCPUUtilizationPercentage: 70
-frontend:
-  image:
-    tag: v1.0.4
-  replicaCount: 1
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 100m
-      memory: 64Mi
+components:
+  backend:
+    image:
+      tag: v1.0.4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      # On, so the HPA configuration itself is exercised before prod depends on it.
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 70
+  frontend:
+    image:
+      tag: v1.0.4
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi

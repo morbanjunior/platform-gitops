@@ -66,10 +66,11 @@ def read_password_secret(path: Path) -> dict:
 class Target:
     """One (application, environment) pair and the values it carries.
 
-    Values are layered the same way Helm layers them: chart defaults first, the
-    environment file on top. The secret's name and key live in the chart (they
-    are the same everywhere); the namespace and the ciphertext live in the
-    environment file, because they differ per environment.
+    Values are layered the same way Helm layers them: the application's
+    defaults first, the environment file on top. The secret's name and key live
+    in apps/<app>/values.yaml (they are the same everywhere); the namespace and
+    the ciphertext live in the environment file, because they differ per
+    environment.
 
     Reading only the environment file would leave the name empty -- and with
     strict scope the ciphertext is bound to namespace AND name, so every
@@ -81,13 +82,13 @@ class Target:
         self.app = path.parent.parent.name
         self.environment = path.stem
 
-        chart_defaults = read_password_secret(path.parent.parent / "chart" / "values.yaml")
+        app_defaults = read_password_secret(path.parent.parent / "values.yaml")
         data = yaml_handler().load(path.read_text(encoding="utf-8")) or {}
         env_secret = ((data.get("database") or {}).get("passwordSecret")) or {}
 
         self.namespace = (data.get("namespace") or {}).get("name") or ""
-        self.secret_name = env_secret.get("name") or chart_defaults.get("name") or ""
-        self.secret_key = env_secret.get("key") or chart_defaults.get("key") or "password"
+        self.secret_name = env_secret.get("name") or app_defaults.get("name") or ""
+        self.secret_key = env_secret.get("key") or app_defaults.get("key") or "password"
         self.encrypted = env_secret.get("encrypted") or ""
 
     def __str__(self) -> str:

@@ -1,0 +1,86 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // How dev gets its image tags.
+  //
+  // It used to be a push straight to main from each application's release
+  // pipeline. That gave main two writers -- reviewed pull requests and a bot
+  // holding a token -- and while the second existed, branch protection could
+  // not be mandatory.
+  //
+  // Renovate proposes instead. Dev still updates without anyone intervening
+  // (see automerge below), but it gets there through a pull request that has
+  // to pass Validate, leaves a merge commit to revert, and cannot touch any
+  // other environment. "The bot deploys" and "the bot proposes and the policy
+  // approves" look the same from a developer's chair and are not the same
+  // thing at all when something goes wrong.
+  //
+  // Dev only. Staging and production are promoted deliberately by promote.yml,
+  // which moves the exact artifact that was already validated in the
+  // environment below. Automatically bumping them would mean production
+  // running a version nobody chose to put there.
+  extends: ["config:recommended"],
+
+  // Never open a pull request that changes something other than an image tag.
+  enabledManagers: ["custom.regex"],
+
+  customManagers: [
+    {
+      customType: "regex",
+      // The path pattern IS the policy. apps/*/envs/dev.yaml and nothing else.
+      managerFilePatterns: ["/^apps/[^/]+/envs/dev\\.yaml$/"],
+      // Each tag is annotated in the values file with the image it tracks:
+      //
+      //   # renovate: datasource=docker depName=morbanjunior/tasks-api
+      //   tag: v1.0.4
+      //
+      // The annotation is what makes the tag self-describing. A bare `tag:`
+      // could be anything; this one says exactly which registry repository it
+      // follows, next to the value itself.
+      matchStrings: [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s+tag:\\s*(?<currentValue>\\S+)",
+      ],
+      versioningTemplate: "semver",
+    },
+  ],
+
+  packageRules: [
+    {
+      matchManagers: ["custom.regex"],
+      // One pull request per image, showing the exact two-line diff a reviewer
+      // can read at a glance. Grouping them would hide which application is
+      // actually changing.
+      commitMessageTopic: "{{depName}}",
+      commitMessagePrefix: "chore(dev):",
+      addLabels: ["deploy", "dev"],
+
+      // Dev deploys itself.
+      //
+      // automergeType "pr" is the part that matters: Renovate does NOT push to
+      // main. It opens the pull request and asks GitHub to merge it once the
+      // required checks pass. If Validate goes red -- a bad render, a manifest
+      // the apiserver would reject -- the pull request simply stays open and
+      // dev keeps running the version it already had.
+      //
+      // This works only because apps/*/envs/dev.yaml has no code owner (see
+      // CODEOWNERS). Give it one and these pull requests wait forever.
+      automerge: true,
+      automergeType: "pr",
+      // A merge commit, not a squash: rolling dev back is then `git revert` of
+      // one commit, the same gesture as staging and production.
+      automergeStrategy: "merge",
+      // Let GitHub's own auto-merge do it, so the merge happens the moment the
+      // checks finish instead of on Renovate's next run.
+      platformAutomerge: true,
+    },
+  ],
+
+  // A pull request left open for days is a version nobody decided about. With
+  // automerge on, anything still open here is something Validate rejected --
+  // worth noticing, not worth accumulating.
+  prConcurrentLimit: 5,
+
+  // Renovate's own dependency dashboard issue: one place to see what is
+  // pending without opening every pull request.
+  dependencyDashboard: true,
+}

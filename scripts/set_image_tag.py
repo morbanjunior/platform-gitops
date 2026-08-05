@@ -3,6 +3,9 @@
 
     set_image_tag.py <values-file> <version> <component> [<component> ...]
 
+Components are the keys under `components:` -- the same names the shared chart
+in charts/app/ renders a Deployment and a Service for.
+
 Why this exists instead of a one-line `yq` call:
 
 `yq` parses YAML into a data structure and serialises it back. It keeps
@@ -44,11 +47,14 @@ def main() -> int:
 
     for component in components:
         try:
-            data[component]["image"]["tag"] = version
+            data["components"][component]["image"]["tag"] = version
         except (KeyError, TypeError) as error:
-            print(f"error: {path} has no {component}.image.tag ({error})", file=sys.stderr)
+            print(
+                f"error: {path} has no components.{component}.image.tag ({error})",
+                file=sys.stderr,
+            )
             return 1
-        print(f"{path}: {component}.image.tag = {version}")
+        print(f"{path}: components.{component}.image.tag = {version}")
 
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         yaml.dump(data, handle)

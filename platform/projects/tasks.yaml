@@ -1,0 +1,53 @@
+# What the tasks application is allowed to do.
+#
+# Before this existed everything ran in the `default` project, which permits
+# any source, any destination and any resource kind. That means a mistake in
+# apps/orders/ -- a copied namespace, a wrong values file -- could deploy into
+# tasks-prod and nothing would stop it. An AppProject turns that from a review
+# problem into a rejected sync.
+#
+# The rules are deliberately narrow. Widening one should require a pull request
+# that explains why.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: tasks
+  namespace: argocd
+  # Wave -1: an AppProject must exist before an Application can reference it.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: Tasks application - FastAPI backend and static frontend
+
+  # One repository. An Application in this project cannot pull a chart from
+  # anywhere else, so a compromised or mistyped repoURL fails instead of
+  # deploying something nobody reviewed.
+  sourceRepos:
+    - https://github.com/morbanjunior/platform-gitops.git
+
+  # The namespace glob is what confines each environment. tasks can create
+  # tasks-dev, tasks-staging and tasks-prod, and nothing else -- notably not
+  # argocd, kube-system, or another application's namespaces.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: tasks-*
+
+  # Cluster-scoped resources: only the namespace the chart creates for itself.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  # Namespaced resources: exactly the kinds this platform's chart renders.
+  # Anything else -- a ServiceAccount, a Role, a CRD -- is a deliberate
+  # decision that belongs in a pull request, not a surprise in a sync.
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: bitnami.com
+      kind: SealedSecret

@@ -3,9 +3,9 @@
 #   kubectl apply -f bootstrap/root.yaml
 #
 # Applied once per cluster. From then on, onboarding an application means
-# adding apps/<name>/ with its Application manifests and pushing; retiring one
-# means deleting that folder. The cluster holds no information that is not in
-# Git, so rebuilding it is an ArgoCD install plus this single command.
+# adding apps/<name>/ with a values file per environment and pushing; retiring
+# one means deleting that folder. The cluster holds no information that is not
+# in Git, so rebuilding it is an ArgoCD install plus this single command.
 #
 # It lives OUTSIDE apps/ deliberately, so it does not manage itself: a bad
 # commit could otherwise leave the root unable to repair itself.
@@ -22,15 +22,13 @@ spec:
   source:
     repoURL: https://github.com/morbanjunior/platform-gitops.git
     targetRevision: main
-    path: apps
+    # platform/ holds the AppProjects and the ApplicationSet that generates
+    # every Application. It needs no include filter: everything under it is a
+    # valid standalone manifest, unlike apps/ and charts/, which hold Helm
+    # templates and values files ArgoCD must never try to apply directly.
+    path: platform
     directory:
       recurse: true
-      # The important part. apps/ contains Helm charts and values files that
-      # are NOT valid standalone manifests -- without this filter ArgoCD would
-      # try to apply raw Go templates to the cluster and fail.
-      #
-      # Only files under apps/<name>/applications/ are applied.
-      include: '*/applications/*.yaml'
 
   destination:
     server: https://kubernetes.default.svc

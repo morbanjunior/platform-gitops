@@ -1,0 +1,40 @@
+{{- if .Values.ingress.enabled }}
+{{- $root := . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "app.name" . }}
+  labels:
+    {{- include "app.labels" (dict "root" $ "component" "ingress") | nindent 4 }}
+  annotations:
+    # Wave 2: last. Routing traffic to Services with no ready endpoints behind
+    # them just returns 503s to whoever is watching the rollout.
+    argocd.argoproj.io/sync-wave: "2"
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ required "ingress.host is required (set it in envs/<env>.yaml)" .Values.ingress.host | quote }}
+      http:
+        paths:
+          {{- range .Values.ingress.paths }}
+          {{- $target := index $root.Values.components .service }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "app.componentName" (dict "root" $root "component" .service) }}
+                port:
+                  number: {{ $target.service.port }}
+          {{- end }}
+{{- end }}
+
+# No rewrite-target annotation by default: a service that owns a path prefix
+# already serves its routes under it, so the path is forwarded untouched.
+# Rewriting here would strip the prefix and turn every call into a 404.
+#
+# An application with a gateway lists a single catch-all path pointing at it and
+# lets the gateway route. Splitting routing between the Ingress and a gateway
+# would mean two places to look when a request lands somewhere unexpected.

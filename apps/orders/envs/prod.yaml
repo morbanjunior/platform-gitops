@@ -1,0 +1,74 @@
+# PRODUCTION
+#
+# Only ever changed by merging a promotion pull request, reviewed by a CODEOWNER.
+# A commit here is a deployment to production: it is the audit record of who
+# approved which version and when.
+#
+# Rollback is `git revert` of that commit.
+
+environment: prod
+
+namespace:
+  name: orders-prod
+
+database:
+  name: appdb_prod
+  passwordSecret:
+    # EMPTY ON PURPOSE, and it must not stay that way.
+    #
+    # A SealedSecret is encrypted against this cluster's public key AND bound to
+    # this namespace, so it cannot be copied from staging -- that binding is
+    # exactly what stops a development password from being replayed into
+    # production. It has to be sealed here:
+    #
+    #   python scripts\secrets.py rotate orders prod
+    #
+    # While it is empty the chart renders no SealedSecret and expects the Secret
+    # to already exist in the namespace, which is how a cluster without the
+    # controller still works. The pods will sit in CreateContainerConfigError
+    # until one or the other is true.
+    encrypted: ""
+
+ingress:
+  # No prefix: production owns the bare hostname.
+  host: orders.local
+
+components:
+  gateway:
+    image:
+      tag: v1.0.0
+    # Two replicas, not one: a single replica means a rolling update, a node
+    # drain or one crash is an outage. Two is the smallest number that survives
+    # losing one -- and the gateway is the only way in, so it is the one
+    # component whose absence takes the whole application down.
+    replicaCount: 2
+    resources:
+      requests: {cpu: 50m, memory: 128Mi}
+      limits: {cpu: 500m, memory: 256Mi}
+
+  api:
+    image:
+      tag: v1.0.0
+    replicaCount: 2
+    resources:
+      requests: {cpu: 100m, memory: 192Mi}
+      limits: {cpu: 500m, memory: 384Mi}
+
+  inventory:
+    image:
+      tag: v1.0.0
+    # Two consumers, the arrangement staging already proved correct: Redis hands
+    # each event to exactly one member of the group, so the totals come out the
+    # same as with one replica. Production is not the place to find out.
+    replicaCount: 2
+    resources:
+      requests: {cpu: 100m, memory: 192Mi}
+      limits: {cpu: 500m, memory: 384Mi}
+
+redis:
+  # More room than staging: this volume holds the events still in flight, and
+  # filling it means dropping them.
+  storage: 5Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 384Mi}

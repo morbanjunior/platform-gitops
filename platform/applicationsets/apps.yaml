@@ -1,0 +1,87 @@
+# Every Application on the platform, generated from the environment values
+# files that already exist.
+#
+# There used to be one hand-written Application per application per environment
+# -- five near-identical files that had to be kept in step by hand. They were
+# not the source of truth for anything: the environment was already declared in
+# apps/<app>/envs/<env>.yaml. This generator reads that file and derives the
+# rest, so adding an environment is adding a values file and nothing else.
+#
+# The generator matches apps/*/envs/*.yaml and parses each one, which is why
+# the parameters below come straight from the file's own contents:
+#
+#   {{index .path.segments 1}}  ->  the application  (apps/<app>/envs)
+#   {{.environment}}            ->  dev | staging | prod
+#   {{.namespace.name}}         ->  the target namespace
+#
+# Nothing is inferred twice. If a values file says namespace tasks-prod, that
+# is where it deploys -- there is no second place to keep in agreement.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+  # Wave 0: after the projects it assigns its generated Applications to.
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  goTemplate: true
+  # Fail loudly on a missing key instead of rendering an empty string into a
+  # namespace or a project name.
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - git:
+        repoURL: https://github.com/morbanjunior/platform-gitops.git
+        revision: main
+        files:
+          - path: apps/*/envs/*.yaml
+
+  template:
+    metadata:
+      name: "{{index .path.segments 1}}-{{.environment}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      # Each application lands in its own AppProject, so the destination and
+      # resource-kind limits in platform/projects/ apply to everything this
+      # generator creates.
+      project: "{{index .path.segments 1}}"
+
+      # Two sources, which is what lets one shared chart read values that live
+      # outside its own directory. The second source contributes no manifests;
+      # it exists so `$values` can resolve paths from the repository root.
+      sources:
+        - repoURL: https://github.com/morbanjunior/platform-gitops.git
+          targetRevision: main
+          path: charts/app
+          helm:
+            # Layered: chart defaults, then application defaults, then the
+            # environment on top.
+            valueFiles:
+              - $values/apps/{{index .path.segments 1}}/values.yaml
+              - $values/apps/{{index .path.segments 1}}/envs/{{.environment}}.yaml
+        - repoURL: https://github.com/morbanjunior/platform-gitops.git
+          targetRevision: main
+          ref: values
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{.namespace.name}}"
+
+      # The same policy in every environment. Production used to be the only
+      # one with a retry block; there is no reason production should be the
+      # environment with the least tested sync behaviour.
+      #
+      # Merging a pull request is still what changes anything here -- automated
+      # sync applies what review already approved, it does not decide.
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m

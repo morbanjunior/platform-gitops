@@ -1,7 +1,11 @@
 # DEV
 #
-# Updated automatically by the orders-platform pipeline on every release.
-# Do not edit the image tags by hand.
+# Image tags here are proposed by Renovate as a pull request and merged
+# automatically once Validate passes -- nobody has to approve a dev deployment.
+# CI never writes to this file directly.
+#
+# Do not edit the tags by hand. If a pull request is sitting open, Validate is
+# red: fix that instead of bypassing it.
 
 environment: dev
 
@@ -19,31 +23,35 @@ database:
 ingress:
   host: dev.orders.local
 
-gateway:
-  image:
-    tag: v1.0.0
-  replicaCount: 1
-  resources:
-    requests: {cpu: 20m, memory: 64Mi}
-    limits: {cpu: 200m, memory: 128Mi}
+components:
+  gateway:
+    image:
+      # renovate: datasource=docker depName=morbanjunior/orders-gateway
+      tag: v1.0.0
+    replicaCount: 1
+    resources:
+      requests: {cpu: 20m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
 
-orders:
-  image:
-    tag: v1.0.0
-  replicaCount: 1
-  resources:
-    requests: {cpu: 50m, memory: 96Mi}
-    limits: {cpu: 300m, memory: 192Mi}
+  api:
+    image:
+      # renovate: datasource=docker depName=morbanjunior/orders-api
+      tag: v1.0.0
+    replicaCount: 1
+    resources:
+      requests: {cpu: 50m, memory: 96Mi}
+      limits: {cpu: 300m, memory: 192Mi}
 
-inventory:
-  image:
-    tag: v1.0.0
-  # One consumer in dev: with a single replica the logs tell the whole story of
-  # what the consumer did, which is what dev is for.
-  replicaCount: 1
-  resources:
-    requests: {cpu: 50m, memory: 96Mi}
-    limits: {cpu: 300m, memory: 192Mi}
+  inventory:
+    image:
+      # renovate: datasource=docker depName=morbanjunior/orders-inventory
+      tag: v1.0.0
+    # One consumer in dev: with a single replica the logs tell the whole story
+    # of what the consumer did, which is what dev is for.
+    replicaCount: 1
+    resources:
+      requests: {cpu: 50m, memory: 96Mi}
+      limits: {cpu: 300m, memory: 192Mi}
 
 redis:
   storage: 1Gi

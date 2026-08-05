@@ -20,34 +20,35 @@ ingress:
   # No prefix: production owns the bare hostname.
   host: tasks.local
 
-backend:
-  image:
-    tag: v1.0.4
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-  autoscaling:
-    enabled: true
-    # minReplicas 2, not 1: a single replica means a rolling update, a node
-    # drain or one crash is an outage. Two is the smallest number that
-    # survives losing one.
-    minReplicas: 2
-    maxReplicas: 5
-    targetCPUUtilizationPercentage: 70
+components:
+  backend:
+    image:
+      tag: v1.0.4
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    autoscaling:
+      enabled: true
+      # minReplicas 2, not 1: a single replica means a rolling update, a node
+      # drain or one crash is an outage. Two is the smallest number that
+      # survives losing one.
+      minReplicas: 2
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
 
-frontend:
-  image:
-    tag: v1.0.4
-  # Same reasoning: static content is cheap, an outage is not.
-  replicaCount: 2
-  resources:
-    requests:
-      cpu: 10m
-      memory: 32Mi
-    limits:
-      cpu: 100m
-      memory: 64Mi
+  frontend:
+    image:
+      tag: v1.0.4
+    # Same reasoning: static content is cheap, an outage is not.
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi

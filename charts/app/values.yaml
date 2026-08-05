@@ -1,0 +1,104 @@
+# Chart defaults for EVERY application on the platform.
+#
+# Nothing application-specific belongs here. An application supplies its own
+# shape in apps/<app>/values.yaml, and each environment overrides the few
+# values that differ in apps/<app>/envs/<env>.yaml. Three layers, applied in
+# that order:
+#
+#   charts/app/values.yaml  ->  apps/<app>/values.yaml  ->  apps/<app>/envs/<env>.yaml
+#
+# Everything below is empty or disabled on purpose: a chart default that does
+# something is a chart default nobody reads.
+
+# Application name. Drives resource names (tasks-backend), the
+# app.kubernetes.io/name and part-of labels, and the Ingress name.
+app: ""
+
+namespace:
+  create: true
+  name: ""          # set per environment
+
+environment: ""     # dev | staging | prod, set per environment
+
+# The components of the application. Each entry renders a Deployment and a
+# ClusterIP Service named <app>-<key>, plus an HPA when autoscaling is enabled.
+#
+# Adding a service to an application is a new key here -- not a new template,
+# and not a new chart.
+#
+# components:
+#   backend:
+#     image:
+#       repository: morbanjunior/tasks-api
+#       tag: ""              # set per environment, rewritten by promotion
+#       pullPolicy: IfNotPresent
+#     replicaCount: 1
+#     port: 8000             # containerPort
+#     service:
+#       port: 8000
+#     resources: {}          # set per environment
+#     database: true         # inject DB_HOST/PORT/USER/NAME/PASSWORD
+#     redis: false           # inject REDIS_HOST/REDIS_PORT
+#     env: []                # extra variables; rendered through `tpl`, so
+#                            # they may reference other components by name
+#     probes:
+#       liveness:  { path: /health, initialDelaySeconds: 10, periodSeconds: 15 }
+#       readiness: { path: /ready,  initialDelaySeconds: 5,  periodSeconds: 10 }
+#     autoscaling:
+#       enabled: false
+#       minReplicas: 1
+#       maxReplicas: 3
+#       targetCPUUtilizationPercentage: 70
+components: {}
+
+ingress:
+  enabled: false
+  className: nginx
+  host: ""          # set per environment
+  annotations: {}
+  # Which component answers which path. Order is preserved as written: the
+  # controller matches the longest prefix, but keeping specific rules above the
+  # catch-all makes the intent readable.
+  #
+  # Only the components listed here are reachable from outside. Everything else
+  # stays ClusterIP-only, which is what makes a gateway a real boundary rather
+  # than a suggestion.
+  paths: []
+  #   - { path: /api, pathType: Prefix, service: backend }
+  #   - { path: /,    pathType: Prefix, service: frontend }
+
+# PostgreSQL runs outside the cluster, as a managed instance would. Only the
+# database name changes per environment; the password always comes from a
+# Secret the cluster holds.
+database:
+  enabled: false
+  host: host.minikube.internal
+  port: 5432
+  user: appuser
+  name: ""          # set per environment
+  passwordSecret:
+    name: ""
+    key: password
+    # Ciphertext set per environment in apps/<app>/envs/<env>.yaml. It cannot
+    # live here: a SealedSecret is bound to one namespace, so every environment
+    # needs its own. Empty means no SealedSecret is rendered and the Secret is
+    # expected to exist already -- which is how a cluster without the
+    # controller still works.
+    encrypted: ""
+
+# Redis lives INSIDE the cluster, unlike Postgres.
+#
+# The reasoning is about what the data is worth. Postgres holds the record of
+# what happened and is worth a managed service with backups and failover. Redis
+# holds events in flight -- seconds to minutes of data. Losing it costs a
+# handful of unprocessed events, not the business. A StatefulSet with a volume
+# is the right amount of durability for that.
+redis:
+  enabled: false
+  image:
+    repository: redis
+    tag: 7-alpine
+    pullPolicy: IfNotPresent
+  port: 6379
+  storage: 1Gi
+  resources: {}

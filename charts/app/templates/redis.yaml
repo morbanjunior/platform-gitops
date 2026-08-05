@@ -1,5 +1,5 @@
 {{- if .Values.redis.enabled }}
-{{- $name := include "orders.componentName" (dict "root" $ "component" "redis") }}
+{{- $name := include "app.componentName" (dict "root" $ "component" "redis") }}
 # A StatefulSet, not a Deployment.
 #
 # The difference that matters here is the volume: a StatefulSet gives each
@@ -7,14 +7,19 @@
 # Deployment and an emptyDir, every restart would wipe the stream -- and a
 # restart happens on every node drain and every image change.
 #
-# The stable name matters too. orders and inventory find Redis by DNS, and a
-# StatefulSet pod is always orders-redis-0, never a random suffix.
+# The stable name matters too. Components find Redis by DNS, and a StatefulSet
+# pod is always <app>-redis-0, never a random suffix.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ $name }}
+  # Wave 0: before the components, which check Redis in their readiness probe.
+  # Starting them first only means a round of probe failures before the first
+  # sync settles.
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   labels:
-    {{- include "orders.labels" (dict "root" $ "component" "redis") | nindent 4 }}
+    {{- include "app.labels" (dict "root" $ "component" "redis") | nindent 4 }}
 spec:
   serviceName: {{ $name }}
   # Exactly one. Redis clustering or replication would be a project of its own,
@@ -22,11 +27,11 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 6 }}
+      {{- include "app.selectorLabels" (dict "root" $ "component" "redis") | nindent 6 }}
   template:
     metadata:
       labels:
-        {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 8 }}
+        {{- include "app.selectorLabels" (dict "root" $ "component" "redis") | nindent 8 }}
     spec:
       containers:
         - name: redis
@@ -66,8 +71,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ $name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   labels:
-    {{- include "orders.labels" (dict "root" $ "component" "redis") | nindent 4 }}
+    {{- include "app.labels" (dict "root" $ "component" "redis") | nindent 4 }}
 spec:
   type: ClusterIP
   ports:
@@ -75,5 +82,5 @@ spec:
       port: {{ .Values.redis.port }}
       targetPort: redis
   selector:
-    {{- include "orders.selectorLabels" (dict "root" $ "component" "redis") | nindent 4 }}
+    {{- include "app.selectorLabels" (dict "root" $ "component" "redis") | nindent 4 }}
 {{- end }}

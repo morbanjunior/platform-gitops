@@ -1,0 +1,54 @@
+name: Renovate
+
+# Runs Renovate against this repository, self-hosted, so the configuration in
+# renovate.json5 is the whole story: what it may change (apps/*/envs/dev.yaml)
+# and nothing else.
+#
+# It proposes; it never deploys. Every update it finds arrives as a pull
+# request that has to pass Validate and be approved like any other change.
+# That is the point of moving dev off a direct push: there is now exactly one
+# way anything reaches main, and it has a reviewer on it.
+on:
+  schedule:
+    # Hourly. Dev is no longer updated the instant a release is published, and
+    # that latency is the price of the review. If it ever gets in the way, an
+    # application's release workflow can dispatch this one directly rather than
+    # going back to writing to main itself.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+# The job itself needs nothing: Renovate authenticates with RENOVATE_TOKEN, not
+# with the workflow's own credentials. Leaving this empty means a compromised
+# step cannot use the ambient token to do anything.
+permissions: {}
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: renovatebot/github-action@v41.0.0
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_PLATFORM: github
+          # Docker Hub allows anonymous tag listing for public repositories, so
+          # no registry credentials are needed here. Add them as a secret if a
+          # repository ever becomes private.
+        with:
+          # NOT secrets.GITHUB_TOKEN. GitHub deliberately refuses to trigger
+          # workflows from events created with the ambient token, to stop a
+          # workflow from recursively triggering itself. A pull request opened
+          # with it would never run Validate -- and with Validate as a required
+          # check that never reports, automerge would wait forever.
+          #
+          # A separate token breaks that loop: the pull request comes from a
+          # different identity, Validate runs, and the merge happens once it is
+          # green. Fine-grained, scoped to this repository only, with
+          # Contents: RW, Pull requests: RW and Issues: RW (dependency
+          # dashboard). See RUNBOOK section 11.
+          token: ${{ secrets.RENOVATE_TOKEN }}

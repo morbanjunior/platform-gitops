@@ -1,16 +1,23 @@
 name: Validate
 
 # Every change to this repository is a change to the cluster, so it gets checked
-# before it can be merged -- including the promotion pull requests opened by the
-# pipelines.
+# before it can be merged -- including the pull requests opened by Renovate and
+# by the promotion pipelines.
 #
 # The failure this prevents: a broken values file merges, ArgoCD applies it, and
 # the first sign of trouble is a Degraded application in the cluster. Here it is
 # a red check on a pull request instead.
+#
+# This workflow is the required status check on main. It is the half of the
+# gate that a human reviewer cannot do reliably: nobody spots a wrong field name
+# in a rendered manifest by reading a two-line values diff.
 on:
   pull_request:
   push:
     branches: [main]
+
+env:
+  CHART: charts/app
 
 jobs:
   render:
@@ -22,35 +29,7 @@ jobs:
         with:
           version: v3.16.3
 
-      - name: Lint and render every app in every environment
-        run: |
-          set -euo pipefail
-          failed=0
-
-          for app in apps/*/; do
-            name=$(basename "$app")
-            [ -d "${app}chart" ] || continue
-
-            for env_file in "${app}envs"/*.yaml; do
-              env_name=$(basename "$env_file" .yaml)
-              echo "::group::$name / $env_name"
-
-              helm lint "${app}chart" \
-                -f "${app}chart/values.yaml" -f "$env_file" || failed=1
-
-              # Rendering is the real check. It is what catches a missing
-              # required value, a bad indent or a template that only breaks
-              # under this particular combination of values.
-              helm template "$name" "${app}chart" \
-                -f "${app}chart/values.yaml" -f "$env_file" > /dev/null || failed=1
-
-              echo "::endgroup::"
-            done
-          done
-
-          exit $failed
-
-      - name: Validate rendered manifests against the Kubernetes API schemas
+      - name: Install kubeconform
         run: |
           set -euo pipefail
           curl -sSL -o /tmp/kubeconform.tar.gz \
@@ -58,18 +37,48 @@ jobs:
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp
           sudo mv /tmp/kubeconform /usr/local/bin/
 
-          for app in apps/*/; do
-            name=$(basename "$app")
-            [ -d "${app}chart" ] || continue
+      - name: Lint the shared chart
+        run: helm lint "$CHART" -f apps/tasks/values.yaml -f apps/tasks/envs/prod.yaml
 
-            for env_file in "${app}envs"/*.yaml; do
-              echo "kubeconform: $name / $(basename "$env_file" .yaml)"
-              # helm template only proves the YAML is valid YAML. kubeconform
-              # proves it is valid Kubernetes: wrong field names, wrong types
-              # and deprecated apiVersions are caught here rather than by the
-              # apiserver during a sync.
-              helm template "$name" "${app}chart" \
-                -f "${app}chart/values.yaml" -f "$env_file" \
-              | kubeconform -strict -summary -ignore-missing-schemas
-            done
+      # The pairs are discovered, never listed. A new application or a new
+      # environment is a values file and nothing else -- if this workflow held a
+      # list, that list would be the one place someone forgets to update, and
+      # the new environment would ship unvalidated.
+      - name: Render and validate every app in every environment
+        run: |
+          set -euo pipefail
+          failed=0
+
+          for env_file in apps/*/envs/*.yaml; do
+            app=$(basename "$(dirname "$(dirname "$env_file")")")
+            env_name=$(basename "$env_file" .yaml)
+            echo "::group::$app / $env_name"
+
+            # Rendering is the first real check: it catches a missing required
+            # value, a bad indent, or a template that only breaks under this
+            # particular combination of values.
+            if ! helm template "$app-$env_name" "$CHART" \
+                 -f "apps/$app/values.yaml" -f "$env_file" > /tmp/rendered.yaml; then
+              echo "::error::render failed for $app/$env_name"
+              failed=1
+              echo "::endgroup::"
+              continue
+            fi
+
+            # helm template only proves the YAML is valid YAML. kubeconform
+            # proves it is valid Kubernetes: wrong field names, wrong types and
+            # deprecated apiVersions are caught here rather than by the
+            # apiserver during a sync.
+            kubeconform -strict -summary -ignore-missing-schemas /tmp/rendered.yaml || failed=1
+
+            echo "::endgroup::"
           done
+
+          exit $failed
+
+      # The AppProjects and the ApplicationSet decide where everything else is
+      # allowed to go, so they are worth checking too. -ignore-missing-schemas
+      # is doing real work here: these are ArgoCD CRDs, and kubeconform has no
+      # schema for them without pulling the CRD definitions in.
+      - name: Validate the platform manifests
+        run: kubeconform -strict -summary -ignore-missing-schemas platform/ bootstrap/

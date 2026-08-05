@@ -1,0 +1,41 @@
+# What the orders application is allowed to do. See projects/tasks.yaml for the
+# reasoning; the rules are the same shape, narrowed to this application.
+#
+# The one addition is StatefulSet: orders runs Redis in-cluster, and tasks does
+# not. Each project lists only the kinds its own application actually renders,
+# so an application cannot start deploying a kind nobody expected from it.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: orders
+  namespace: argocd
+  # Wave -1: an AppProject must exist before an Application can reference it.
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  description: Orders platform - gateway, api and inventory services with Redis Streams
+
+  sourceRepos:
+    - https://github.com/morbanjunior/platform-gitops.git
+
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: orders-*
+
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: Service
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+    - group: networking.k8s.io
+      kind: Ingress
+    - group: bitnami.com
+      kind: SealedSecret
